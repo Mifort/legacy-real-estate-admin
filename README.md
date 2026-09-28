@@ -5,13 +5,20 @@
 
 ## Запуск
 
-Требуется Docker (Docker Desktop / Docker Engine).
+Требуется Docker с Compose (Docker Desktop / Docker Engine).
+Команды ниже — для Bash (Linux, macOS или WSL). Python и PHP на компьютере не нужны.
 
 ```bash
-python3 scripts/setup-secrets.py  # новый запуск: генерирует локальные секреты
+# Новый запуск: PHP в одноразовом контейнере генерирует локальные секреты
+docker run --rm --user "$(id -u):$(id -g)" \
+  -v "$PWD:/app" -w /app php:8.2-cli php scripts/setup-secrets.php
 docker compose up -d --build
 docker compose exec -T web php scripts/set-admin-password.php < .local-secrets/admin-password
 ```
+
+Если PHP уже установлен локально, вместо первой команды можно выполнить
+`php scripts/setup-secrets.php`. Генератор работает до запуска Compose и не
+требует подключения к БД или установки Composer-зависимостей.
 
 При первом старте база инициализируется из `sql/testdb.sql` (уже содержит все изменения),
 а PHP-зависимости ставятся автоматически (`composer install` при старте контейнера).

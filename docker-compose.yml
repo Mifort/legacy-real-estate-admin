@@ -8,9 +8,9 @@ services:
     environment:
       DB_HOST: db
       DB_USER: ${DB_USER:-testdb}
-      DB_PASSWORD: ${DB_PASSWORD:?Run python3 scripts/setup-secrets.py first}
+      DB_PASSWORD: ${DB_PASSWORD:?Generate secrets first - see README.md}
       DB_NAME: ${DB_NAME:-testdb}
-      AES_KEY: ${AES_KEY:?Run python3 scripts/setup-secrets.py first}
+      AES_KEY: ${AES_KEY:?Generate secrets first - see README.md}
     depends_on:
       db:
         condition: service_healthy
@@ -18,10 +18,10 @@ services:
   db:
     image: mysql:8.0
     environment:
-      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?Run python3 scripts/setup-secrets.py first}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?Generate secrets first - see README.md}
       MYSQL_DATABASE: ${DB_NAME:-testdb}
       MYSQL_USER: ${DB_USER:-testdb}
-      MYSQL_PASSWORD: ${DB_PASSWORD:?Run python3 scripts/setup-secrets.py first}
+      MYSQL_PASSWORD: ${DB_PASSWORD:?Generate secrets first - see README.md}
     volumes:
       - ./sql/testdb.sql:/docker-entrypoint-initdb.d/01-testdb.sql:ro
       - ./docker/mysql/my.cnf:/etc/mysql/conf.d/app.cnf:ro
