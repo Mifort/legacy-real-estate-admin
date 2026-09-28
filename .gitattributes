@@ -1,0 +1,11 @@
+# Инфраструктурные файлы читаются Linux-инструментами — всегда LF,
+# иначе CRLF ломает shebang в .sh и добавляет \r в значения .env
+*.sh            text eol=lf
+*.yml           text eol=lf
+*.yaml          text eol=lf
+*.ini           text eol=lf
+*.cnf           text eol=lf
+Dockerfile      text eol=lf
+.env.example    text eol=lf
+.gitignore      text eol=lf
+.gitattributes  text eol=lf
