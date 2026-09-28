@@ -75,27 +75,31 @@
         die("Неизвестная таблица");
     }
 
-    // Черновики загрузок: файлы новой записи загружаются под ключом d<32 hex> (ID ещё нет),
-    // ключ запоминается в сессии загрузившего и действует сутки
+    // Черновики загрузок: файлы новой записи загружаются под ключом d<32 hex> (ID ещё нет).
+    // Ключ попадает в публичный путь фото, поэтому он не секрет: право на черновик хранится
+    // в БД (NL_UPLOAD_DRAFT), первый загрузивший — владелец. Черновик, по которому запись уже
+    // сохранена (ключ есть в NL_FORM_SUBMIT), закрыт для новых загрузок и ссылок
     const UPLOAD_DRAFT_TTL = 86400;
 
-    function upload_draft_register($token) {
-        $now = time();
-        $drafts = $_SESSION["upload_drafts"] ?? array();
-        foreach ($drafts as $t => $created) {
-            if ($now - $created > UPLOAD_DRAFT_TTL) {
-                unset($drafts[$t]);
-            }
-        }
-        if (!isset($drafts[$token])) {
-            $drafts[$token] = $now;
-        }
-        $_SESSION["upload_drafts"] = $drafts;
+    function upload_draft_consumed($token) {
+        $res = db_query("SELECT 1 FROM NL_FORM_SUBMIT WHERE NL_FORM_SUBMIT_TOKEN = " . db_quote($token)) or die(db_error("upload_draft_consumed"));
+        return db_num_rows($res) > 0;
     }
 
+    // Закрепляет черновик за текущим пользователем. false — черновик чужой или уже сохранён
+    function upload_draft_claim($token) {
+        if (upload_draft_consumed($token)) {
+            return false;
+        }
+        db_query("INSERT IGNORE INTO NL_UPLOAD_DRAFT (NL_UPLOAD_DRAFT_TOKEN, ID_NL_USER, NL_UPLOAD_DRAFT_TIME) VALUES (" . db_quote($token) . ", " . db_int($_SESSION["ID_NL_USER"]) . ", NOW())") or die(db_error("upload_draft_claim"));
+        return upload_draft_owned($token);
+    }
+
+    // Черновик принадлежит текущему пользователю и ещё не сохранён
     function upload_draft_owned($token) {
-        $created = $_SESSION["upload_drafts"][$token] ?? null;
-        return ($created !== null) && (time() - $created <= UPLOAD_DRAFT_TTL);
+        $res = db_query("SELECT ID_NL_USER FROM NL_UPLOAD_DRAFT WHERE NL_UPLOAD_DRAFT_TOKEN = " . db_quote($token)) or die(db_error("upload_draft_owned"));
+        $row = db_fetch_assoc($res);
+        return $row && ((int)$row["ID_NL_USER"] === (int)$_SESSION["ID_NL_USER"]) && !upload_draft_consumed($token);
     }
 
     // Определение IP клиента (используется для журнала и троттлинга входа)
@@ -1117,7 +1121,7 @@ function showOnlyMy(jqgrid, row) {
                     foreach (array_diff(is_array($oldPhotos) ? $oldPhotos : array(), is_array($newPhotos) ? $newPhotos : array()) as $photo) {
                         $file = $this->photoFilePath($photo);
                         if ($file !== null) {
-                            $filesToDelete[] = $file;
+                            $filesToDelete[$photo] = $file;
                         }
                     }
                 }
@@ -1147,13 +1151,34 @@ function showOnlyMy(jqgrid, row) {
 
             db_query("COMMIT") or $this->rollbackAndDie("COMMIT");
 
-            // Данные сохранены. Сбой удаления оставит лишний файл (мусор, его уберёт очистка
-            // неиспользуемых файлов), но не потерю данных
-            foreach ($filesToDelete as $file) {
+            // Данные сохранены. Файл, на который ссылается другая запись, не удаляем. Сбой
+            // удаления оставит лишний файл (мусор, его уберёт очистка), но не потерю данных
+            foreach ($filesToDelete as $photo => $file) {
+                if ($this->photoReferencedElsewhere($photo, db_int($id))) {
+                    continue;
+                }
                 if (is_file($file) && !@unlink($file)) {
                     error_log("saveData: could not delete " . $file);
                 }
             }
+        }
+
+        // Ссылается ли на файл какая-либо запись, кроме $excludeId (по всем фото-колонкам таблицы)
+        private function photoReferencedElsewhere($photo, $excludeId) {
+            $like = db_quote('%"' . addcslashes($photo, '%_\\') . '"%');
+            for ($i = 0; $i < (count($this->colArray) / 2); $i++) {
+                $col = $this->colArray[$i];
+                if (($col->type != "photo") && ($col->type != "photos")) {
+                    continue;
+                }
+                $q = "SELECT 1 FROM " . $this->dbName . " WHERE ID_" . $this->dbName . " <> " . db_int($excludeId) . " AND " . $col->dbName . " LIKE " . $like . " LIMIT 1";
+                $res = db_query($q);
+                // Если проверить не удалось — считаем, что файл используется, и не удаляем
+                if (!$res || (db_num_rows($res) > 0)) {
+                    return true;
+                }
+            }
+            return false;
         }
 
         // Ошибка внутри транзакции: сообщение фиксируем до ROLLBACK (иначе потеряется текст ошибки)
@@ -1230,7 +1255,11 @@ function showOnlyMy(jqgrid, row) {
                         }
                         $isDraft = isset($m[2]) && ($m[2] !== "");
                         $alreadySaved = ($oper == "edit") && in_array($photo, $savedPhotos, true);
-                        $allowed = $alreadySaved || ($isDraft ? (($oper == "add") && upload_draft_owned($m[2])) : (($oper == "edit") && ((int)$m[1] === (int)$id)));
+                        // Черновик — только этой же формы (ключ черновика = ключ отправки) и только свой
+                        $formToken = (string)($post["form_submit"] ?? "");
+                        $allowed = $alreadySaved || ($isDraft
+                            ? (($oper == "add") && ($m[2] === $formToken) && upload_draft_owned($m[2]))
+                            : (($oper == "edit") && ((int)$m[1] === (int)$id)));
                         if (!$allowed) {
                             return "Фотография не принадлежит этой записи";
                         }

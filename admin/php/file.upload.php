@@ -70,7 +70,11 @@
     // (ID новой записи назначит база при сохранении, тогда файлы будут переименованы)
     $reqId = (string)($_REQUEST["id"] ?? "");
     if (preg_match('/^d([a-f0-9]{32})$/', $reqId, $m)) {
-        upload_draft_register($m[1]);
+        // Ключ черновика публичен (виден в пути фото), поэтому владелец проверяется на сервере
+        if (!upload_draft_claim($m[1])) {
+            http_response_code(403);
+            die("Черновик принадлежит другому пользователю или уже сохранён, откройте форму заново");
+        }
         $fileKey = "d" . $m[1];
     } elseif (ctype_digit($reqId) && ((int)$reqId > 0)) {
         $id = (int)$reqId;
@@ -113,6 +117,9 @@
             }
         }
     }
+    // Старые записи о черновиках: файлы несохранённых уже убраны, а ключи сохранённых
+    // защищены от повторного захвата через NL_FORM_SUBMIT
+    db_query("DELETE FROM NL_UPLOAD_DRAFT WHERE NL_UPLOAD_DRAFT_TIME < (NOW() - INTERVAL 2 DAY)") or die(db_error("upload draft prune"));
     foreach ((glob($targetDir . "/*") ?: array()) as $stale) {
         if (is_file($stale) && !isset($referenced[basename($stale)]) && (time() - filemtime($stale) > UPLOAD_DRAFT_TTL)) {
             @unlink($stale);
