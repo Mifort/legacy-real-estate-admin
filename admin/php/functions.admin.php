@@ -75,6 +75,29 @@
         die("Неизвестная таблица");
     }
 
+    // Черновики загрузок: файлы новой записи загружаются под ключом d<32 hex> (ID ещё нет),
+    // ключ запоминается в сессии загрузившего и действует сутки
+    const UPLOAD_DRAFT_TTL = 86400;
+
+    function upload_draft_register($token) {
+        $now = time();
+        $drafts = $_SESSION["upload_drafts"] ?? array();
+        foreach ($drafts as $t => $created) {
+            if ($now - $created > UPLOAD_DRAFT_TTL) {
+                unset($drafts[$t]);
+            }
+        }
+        if (!isset($drafts[$token])) {
+            $drafts[$token] = $now;
+        }
+        $_SESSION["upload_drafts"] = $drafts;
+    }
+
+    function upload_draft_owned($token) {
+        $created = $_SESSION["upload_drafts"][$token] ?? null;
+        return ($created !== null) && (time() - $created <= UPLOAD_DRAFT_TTL);
+    }
+
     // Определение IP клиента (используется для журнала и троттлинга входа)
     function client_ip() {
         $ip = $_SERVER["REMOTE_ADDR"] ?? "unknown";
@@ -134,21 +157,8 @@
                     $colObject->render = true;
                     $colObject->editable = true;
                     $colObject->editHidden = false;
-                    $colObject->defValue = 'function(){
-                        var defVal = "";
-                        $.ajax({
-                            url: "/admin/php/set_id.php",
-                            data: {
-                                "table": "' . $this->dbName . '"
-                            },
-                            method: "POST",
-                            async: false,
-                            success: function (data) {
-                                defVal = $.trim(data);
-                            }
-                        });
-                        return defVal;
-                    }';
+                    // ID новой записи назначает база (AUTO_INCREMENT) при вставке;
+                    // в форме добавления поле пустое, при редактировании — ID записи
                     $colObject->width = 40;
                     break;
                 case "ID_NL_USER":
@@ -964,18 +974,7 @@ function showOnlyMy(jqgrid, row) {
 
             $res_cur = null;
             $row_cur = array();
-            if ($oper == "add") {
-                // ID новой записи приходит из формы (set_id.php). Занятый номер отклоняем сразу,
-                // до любых побочных эффектов: иначе можно было задеть файлы чужой записи
-                $newId = db_int($post["ID_" . $this->dbName] ?? 0);
-                if ($newId > 0) {
-                    $resExists = db_query("SELECT 1 FROM " . $this->dbName . " WHERE ID_" . $this->dbName . " = " . $newId) or die(db_error("saveData exists"));
-                    if (db_num_rows($resExists) > 0) {
-                        http_response_code(409);
-                        die("Запись с таким номером уже существует, откройте форму добавления заново");
-                    }
-                }
-            } else {
+            if ($oper != "add") {
                 $query_cur = "SELECT * FROM " . $this->dbName . " WHERE ID_" . $this->dbName . " = " . db_int($id);
                 $res_cur = db_query($query_cur) or die(db_error($query_cur));
                 $row_cur = db_fetch_assoc($res_cur);
@@ -995,7 +994,7 @@ function showOnlyMy(jqgrid, row) {
 
             // Серверная проверка значений (клиентские required/maxLength можно обойти)
             if ($oper != "del") {
-                $error = $this->validatePost($oper, $post);
+                $error = $this->validatePost($oper, db_int($id), $post);
                 if ($error !== "") {
                     http_response_code(400);
                     die($error);
@@ -1018,10 +1017,13 @@ function showOnlyMy(jqgrid, row) {
                 $col = $this->colArray[$i];
 
                 if (($col->editable) && ($col->thisTable)) {
-                    // Первичный ключ: используем проверенное серверное значение, не даём подменить
+                    // Первичный ключ: при добавлении его назначает база (AUTO_INCREMENT) —
+                    // значение из формы не используется; при изменении — проверенный $id
                     if ($col->dbName === "ID_" . $this->dbName) {
-                        array_push($fields, $col->dbName);
-                        array_push($values, db_int($oper == "add" ? ($post[$col->dbName] ?? 0) : $id));
+                        if ($oper != "add") {
+                            array_push($fields, $col->dbName);
+                            array_push($values, db_int($id));
+                        }
                         continue;
                     }
 
@@ -1118,10 +1120,53 @@ function showOnlyMy(jqgrid, row) {
                     unlink($file);
                 }
             }
+
+            if ($oper == "add") {
+                $this->attachDraftPhotos($post);
+            }
+        }
+
+        // После вставки: ID назначила база. Файлы черновика (<COL>_d<ключ>_...) переименовываем
+        // в <COL>_<ID>_... и сохраняем в записи новые пути
+        private function attachDraftPhotos($post) {
+            $resNew = db_query("SELECT LAST_INSERT_ID() AS ID_NEW") or die(db_error("LAST_INSERT_ID"));
+            $newId = (int)db_fetch_assoc($resNew)["ID_NEW"];
+            if ($newId <= 0) {
+                return;
+            }
+            $root = $_SERVER["DOCUMENT_ROOT"];
+            for ($i = 0; $i < (count($this->colArray) / 2); $i++) {
+                $col = $this->colArray[$i];
+                if ((($col->type != "photo") && ($col->type != "photos")) || empty($post[$col->dbName])) {
+                    continue;
+                }
+                $photos = json_decode($post[$col->dbName], true);
+                if (!is_array($photos)) {
+                    continue;
+                }
+                $colPrefix = str_replace($this->dbName . "_", "", $col->dbName);
+                $changed = false;
+                foreach ($photos as $k => $photo) {
+                    $base = basename($photo);
+                    if (!preg_match('/^' . preg_quote($colPrefix, '/') . '_d[a-f0-9]{32}_(.+)$/', $base, $m)) {
+                        continue;
+                    }
+                    $newPath = dirname($photo) . "/" . $colPrefix . "_" . $newId . "_" . $m[1];
+                    if (is_file($root . $photo) && !file_exists($root . $newPath) && rename($root . $photo, $root . $newPath)) {
+                        $photos[$k] = $newPath;
+                        $changed = true;
+                    } else {
+                        error_log("attachDraftPhotos: could not rename " . $photo);
+                    }
+                }
+                if ($changed) {
+                    db_query("UPDATE " . $this->dbName . " SET " . $col->dbName . " = " . db_quote(json_encode(array_values($photos), JSON_UNESCAPED_SLASHES)) . " WHERE ID_" . $this->dbName . " = " . $newId) or die(db_error("attachDraftPhotos"));
+                }
+            }
         }
 
         // Проверяет и нормализует значения формы. Возвращает текст ошибки или "".
-        private function validatePost($oper, &$post) {
+        private function validatePost($oper, $id, &$post) {
             for ($i = 0; $i < (count($this->colArray) / 2); $i++) {
                 /* @var $col ObjectParam */
                 $col = $this->colArray[$i];
@@ -1149,9 +1194,18 @@ function showOnlyMy(jqgrid, row) {
                         return "Некорректный список фотографий";
                     }
                     $dir = strtolower(str_replace("NL_", "", $this->dbName));
+                    $colPrefix = str_replace($this->dbName . "_", "", $col->dbName);
                     foreach ($photos as $photo) {
                         if (!is_string($photo) || !preg_match('#^/img/' . preg_quote($dir, '#') . '/[A-Za-z0-9_.-]+\.(jpe?g|png|gif|webp)$#i', $photo)) {
                             return "Недопустимый путь фотографии";
+                        }
+                        // Файл должен принадлежать этой записи (edit) или черновику пользователя (add)
+                        if (!preg_match('/^' . preg_quote($colPrefix, '/') . '_(\d+|d([a-f0-9]{32}))_/', basename($photo), $m)) {
+                            return "Недопустимое имя файла фотографии";
+                        }
+                        $isDraft = isset($m[2]) && ($m[2] !== "");
+                        if ($isDraft ? (($oper != "add") || !upload_draft_owned($m[2])) : (($oper != "edit") || ((int)$m[1] !== (int)$id))) {
+                            return "Фотография не принадлежит этой записи";
                         }
                     }
                     // Храним в каноническом виде

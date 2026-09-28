@@ -160,6 +160,14 @@ Array.prototype.remove = function () {
     return this;
 };
 
+function uploadDraftToken() {
+    var bytes = new Uint8Array(16);
+    window.crypto.getRandomValues(bytes);
+    return Array.prototype.map.call(bytes, function (b) {
+        return ("0" + b.toString(16)).slice(-2);
+    }).join("");
+}
+
 function dataInitFileFunction(el, dbName, colName, multiple, onlyPhoto, massDocs) {
     multiple = multiple || false;
     massDocs = massDocs || false;
@@ -276,7 +284,16 @@ function dataInitFileFunction(el, dbName, colName, multiple, onlyPhoto, massDocs
     var parent = $(el).parent();
     var nameHidden = el.id;
     var nameFile = el.id + "_file";
-    var id = $(el).parents(".EditTable").find("#ID_" + dbName).val();
+    var $form = $(el).parents(".EditTable");
+    var id = $form.find("#ID_" + dbName).val();
+    if (!id) {
+        // Новая запись: ID назначит база при сохранении, файлы загружаем под ключом черновика
+        // (один на форму), сервер переименует их после успешной вставки
+        if (!$form.data("uploadDraft")) {
+            $form.data("uploadDraft", uploadDraftToken());
+        }
+        id = "d" + $form.data("uploadDraft");
+    }
     inputFileSet(dbName, colName, multiple, parent, nameHidden, nameFile, id, onlyPhoto, massDocs);
 
     var imgContainer = $("<div></div>").addClass("jqGridFormImgContainer");

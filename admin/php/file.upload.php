@@ -60,25 +60,35 @@
     $dir = strtolower(str_replace("NL_", "", $tbl));
     // 24-часовой формат + случайный суффикс: несколько файлов за секунду не перезапишут друг друга
     $date = date('ymd_His', time()) . "_" . bin2hex(random_bytes(4));
-    $id = db_int($_REQUEST["id"] ?? 0);
-
     // Гость не сохраняет записи — и файлы ему загружать незачем
     if ($_SESSION["ID_NL_USER_PERMISSION"] == "3") {
         http_response_code(403);
         die("Недостаточно прав");
     }
 
-    // Файлы существующей записи может добавлять только её владелец или администратор.
-    // Для новой записи (ID ещё не занят) проверять нечего
-    if ($id > 0) {
+    // id — либо ID существующей записи, либо ключ черновика новой записи d<32 hex>
+    // (ID новой записи назначит база при сохранении, тогда файлы будут переименованы)
+    $reqId = (string)($_REQUEST["id"] ?? "");
+    if (preg_match('/^d([a-f0-9]{32})$/', $reqId, $m)) {
+        upload_draft_register($m[1]);
+        $fileKey = "d" . $m[1];
+    } elseif (ctype_digit($reqId) && ((int)$reqId > 0)) {
+        $id = (int)$reqId;
+        // Файлы существующей записи может добавлять только её владелец или администратор
         $resOwner = db_query("SELECT * FROM " . $tbl . " WHERE ID_" . $tbl . " = " . $id) or die(db_error("upload owner"));
         $rowOwner = db_fetch_assoc($resOwner);
-        if ($rowOwner) {
-            if (!is_admin() && array_key_exists("ID_NL_USER", $rowOwner) && ($rowOwner["ID_NL_USER"] != $_SESSION["ID_NL_USER"])) {
-                http_response_code(403);
-                die("Нельзя загружать файлы в чужую запись");
-            }
+        if (!$rowOwner) {
+            http_response_code(404);
+            die("Запись не найдена");
         }
+        if (!is_admin() && array_key_exists("ID_NL_USER", $rowOwner) && ($rowOwner["ID_NL_USER"] != $_SESSION["ID_NL_USER"])) {
+            http_response_code(403);
+            die("Нельзя загружать файлы в чужую запись");
+        }
+        $fileKey = (string)$id;
+    } else {
+        http_response_code(400);
+        die("Некорректный идентификатор записи");
     }
 
     $baseDir = realpath($_SERVER["DOCUMENT_ROOT"] . "/img");
@@ -87,7 +97,14 @@
         mkdir($targetDir, 0755, true);
     }
 
-    $filename = "/img/" . $dir . "/" . $col . "_" . $id . "_" . $date . "." . $ext;
+    // Файлы брошенных черновиков (форма добавления закрыта без сохранения) старше суток удаляем
+    foreach ((glob($targetDir . "/*_d*") ?: array()) as $stale) {
+        if (preg_match('/_d[a-f0-9]{32}_/', basename($stale)) && is_file($stale) && (time() - filemtime($stale) > UPLOAD_DRAFT_TTL)) {
+            @unlink($stale);
+        }
+    }
+
+    $filename = "/img/" . $dir . "/" . $col . "_" . $fileKey . "_" . $date . "." . $ext;
     $uploadfile = $_SERVER["DOCUMENT_ROOT"] . $filename;
 
     if (file_exists($uploadfile)) {
