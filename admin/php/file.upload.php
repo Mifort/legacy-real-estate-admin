@@ -6,6 +6,7 @@
     db_connect();
 
     // Загружать файлы может только авторизованный пользователь, с валидным CSRF-токеном
+    require_post();
     require_csrf();
     $tbl = require_table($_REQUEST["table"] ?? "");
 
@@ -57,7 +58,8 @@
 
     $col = mb_ereg_replace($tbl . "_", "", $reqCol);
     $dir = strtolower(str_replace("NL_", "", $tbl));
-    $date = date('ymd_his', time());
+    // 24-часовой формат + случайный суффикс: несколько файлов за секунду не перезапишут друг друга
+    $date = date('ymd_His', time()) . "_" . bin2hex(random_bytes(4));
     $id = db_int($_REQUEST["id"] ?? 0);
 
     $baseDir = realpath($_SERVER["DOCUMENT_ROOT"] . "/img");
@@ -68,6 +70,11 @@
 
     $filename = "/img/" . $dir . "/" . $col . "_" . $id . "_" . $date . "." . $ext;
     $uploadfile = $_SERVER["DOCUMENT_ROOT"] . $filename;
+
+    if (file_exists($uploadfile)) {
+        http_response_code(409);
+        die("Файл с таким именем уже существует, повторите загрузку");
+    }
 
     if (move_uploaded_file($baseTmpName, $uploadfile)) {
         echo '"' . $filename . '"';

@@ -343,10 +343,29 @@ function numberFormatter(cellvalue, options, rowObject) {
     return newValue;
 }
 
+// Значения ячеек экранируются при выводе (autoencode не используется: в этой версии
+// jqGrid он кодирует и отправляемые значения формы, портя JSON и спецсимволы)
+function textFormatter(cellvalue, options, rowObject) {
+    if (cellvalue === undefined || cellvalue === null) {
+        return "";
+    }
+    return $.jgrid.htmlEncode(String(cellvalue));
+}
+
+// jqGrid передаёт сюда $(cell).text() — исходное значение без HTML
+function textUnformat(cellvalue, options, cell) {
+    return cellvalue;
+}
+
+// Для формы редактирования — только JSON из скрытого span, как текст
+function photosUnformat(cellvalue, options, cell) {
+    return $(cell).find(".g-hidden").text();
+}
+
 function photosFormatter(cellvalue, options, rowObject) {
     var newValue = "";
     if (cellvalue) {
-        newValue = '<span class="g-hidden">' + cellvalue + '</span>';
+        newValue = '<span class="g-hidden">' + $.jgrid.htmlEncode(String(cellvalue)) + '</span>';
         newValue = '<img alt="Фото" class="icon__photo" src="/admin/img/picture.png" />' + newValue;
         /*var photos = JSON.parse(cellvalue);
          for (var i = 0; i < photos.length; i++) {
@@ -360,6 +379,7 @@ $(document).ready(function () {
     $(".admin__exit").click(function () {
         $.ajax({
             url: "/admin/php/logout.php",
+            method: "POST",
             complete: function () {
                 location.reload();
             }

@@ -40,6 +40,15 @@
         }
     }
 
+    // Изменяющие действия — только POST (иначе require_csrf ничего не проверит)
+    function require_post() {
+        if (($_SERVER["REQUEST_METHOD"] ?? "GET") !== "POST") {
+            http_response_code(405);
+            header("Allow: POST");
+            die("Метод не поддерживается");
+        }
+    }
+
     // Проверка CSRF-токена для любых POST-запросов
     function require_csrf() {
         if (($_SERVER["REQUEST_METHOD"] ?? "GET") !== "POST") {
@@ -476,6 +485,14 @@ function showOnlyMy(jqgrid, row) {
                 if (!$col->render) {
                     $colModel .= ', hidden : true';
                 }
+                // colModel - formatter: значения экранируются при выводе в ячейку
+                if (($col->type == "photo") || ($col->type == "photos")) {
+                    $colModel .= ', formatter: photosFormatter, unformat: photosUnformat';
+                } elseif ($col->type == "float") {
+                    $colModel .= ', formatter: numberFormatter';
+                } elseif ($col->formatter === false) {
+                    $colModel .= ', formatter: textFormatter, unformat: textUnformat';
+                }
                 // colModel - editable
                 if ($col->editable) {
                     $colModel .= ', editable : true';
@@ -491,13 +508,11 @@ function showOnlyMy(jqgrid, row) {
                     } elseif (($col->type == "file") || ($col->type == "map")) {
                         $colModel .= ', edittype : "text"';
                     } elseif (($col->type == "photo") || ($col->type == "photos")) {
-                        $colModel .= ', edittype : "text", formatter: photosFormatter ';
+                        $colModel .= ', edittype : "text"';
                     } elseif ($col->type == "encrypted") {
                         $colModel .= ', edittype : "password"';
                     } elseif ($col->type == "rich") {
                         $colModel .= ', edittype : "custom"';
-                    } elseif ($col->type == "float") {
-                        $colModel .= ", formatter: numberFormatter ";
                     }
                     if (($col->formatter !== false) && ($col->type != "photo") && ($col->type != "photos")) {
                         $colModel .= ', formatter: function(cellValue, options, rowObject) {
@@ -613,12 +628,8 @@ function showOnlyMy(jqgrid, row) {
                             dataInitFileFunction(el, "' . $this->dbName . '", "' . $col->dbName . '", ' . $multiple . ');
                         }';*/
 
+                        // Значение уже содержит чистый JSON (см. photosUnformat), HTML не разбираем
                         $dataInit .= '
-                            var elVal = $.parseHTML($(el).val());
-                            //console.log(elVal)
-                            if (elVal) {
-                                $(el).val(elVal[1].innerText);
-                            }
                             dataInitFileFunction(el, "' . $this->dbName . '", "' . $col->dbName . '", ' . $multiple . ', ' . $only_photo . ');
                         ';
                     } elseif ($col->type == "rich") {
@@ -786,7 +797,7 @@ function showOnlyMy(jqgrid, row) {
                 // Сортировка только по известной колонке (белый список) и в фиксированном направлении
                 $sortCol = "ID_" . $this->dbName;
                 foreach ($this->colArray as $col) {
-                    if (is_object($col) && ($col->dbName === $sidx)) {
+                    if (is_object($col) && ($col->dbName === $sidx) && !($col->private && !is_admin()) && ($col->type != "encrypted")) {
                         $sortCol = $sidx;
                         break;
                     }
@@ -862,6 +873,11 @@ function showOnlyMy(jqgrid, row) {
                 elseif (substr($key, -3) === "_to") { $baseKey = substr($key, 0, -3); $op = "<="; }
                 if (!isset($colByName[$baseKey])) { continue; }
                 $col = $colByName[$baseKey];
+                // По приватным полям ищет только админ: иначе по числу найденных записей
+                // можно подбирать чужой контакт, даже если сама ячейка скрыта
+                if ($col->private && !is_admin()) { continue; }
+                // Пароли в поиске не участвуют ни для кого
+                if ($col->type == "encrypted") { continue; }
                 $field = $baseKey;
                 if (strpos($baseKey, "ID_") === 0) {
                     $field = substr($baseKey, 3) . "_SHORT";
@@ -879,6 +895,10 @@ function showOnlyMy(jqgrid, row) {
 
             $leftJoin = $this->get_query_left_joins();
             $query = "SELECT COUNT(*) AS COUNT FROM " . $this->dbName . " tbl $leftJoin WHERE $search_where";
+            // Те же ограничения, что и в выборке (getData), иначе счётчик раскрывает лишнее
+            if (isset($this->where) && ($this->where != false) && (trim($this->where) != "")) {
+                $query .= " AND " . $this->where;
+            }
             $res = db_query($query) or die(db_error($query));
             $row = db_fetch_assoc($res);
             // Теперь эта переменная хранит кол-во записей в таблице
@@ -950,6 +970,15 @@ function showOnlyMy(jqgrid, row) {
                 }
             }
 
+            // Серверная проверка значений (клиентские required/maxLength можно обойти)
+            if ($oper != "del") {
+                $error = $this->validatePost($oper, $post);
+                if ($error !== "") {
+                    http_response_code(400);
+                    die($error);
+                }
+            }
+
             $user_ip = client_ip();
             // log master
             $query_log = "INSERT INTO NL_LOG(NL_LOG_DATE, NL_LOG_TIME, NL_LOG_IP, NL_LOG_IUD, NL_LOG_TABLE_NAME, ID_NL_USER) VALUES(" . db_quote(date("Y.m.d")) . ", " . db_quote(date("H:i:s")) . ", " . db_quote($user_ip) . ", " . db_quote($oper) . ", " . db_quote($this->dbName) . ", " . db_int($_SESSION["ID_NL_USER"]) . ")";
@@ -1016,8 +1045,9 @@ function showOnlyMy(jqgrid, row) {
                     if (($oper == "add") && isset($values[0]) && is_numeric($values[0])) {
                         $trueId = db_int($values[0]);
                     }
-                    $imgsPath = $_SERVER["DOCUMENT_ROOT"] . "/img/objects/" . str_replace("NL_", "", $this->dbName) . "/";
-                    foreach (glob($imgsPath . str_replace($this->dbName . "_", "", $col->dbName) . "_" . $trueId . "*.jpg") as $fullFileName) {
+                    // Тот же каталог и шаблон имени, что в file.upload.php: <COL>_<ID>_<дата>_<суффикс>.<ext>
+                    $imgsPath = $_SERVER["DOCUMENT_ROOT"] . "/img/" . strtolower(str_replace("NL_", "", $this->dbName)) . "/";
+                    foreach ((glob($imgsPath . str_replace($this->dbName . "_", "", $col->dbName) . "_" . $trueId . "_*") ?: array()) as $fullFileName) {
                         $fileName = mb_substr($fullFileName, mb_strrpos($fullFileName, "/") + 1);
                         $needDel = true;
                         if ($oper != "del") {
@@ -1056,6 +1086,56 @@ function showOnlyMy(jqgrid, row) {
                 $query = "DELETE FROM " . $this->dbName . " WHERE ID_" . $this->dbName . " = " . db_int($id);
             }
             db_query($query) or die(db_error($query));
+        }
+
+        // Проверяет и нормализует значения формы. Возвращает текст ошибки или "".
+        private function validatePost($oper, &$post) {
+            for ($i = 0; $i < (count($this->colArray) / 2); $i++) {
+                /* @var $col ObjectParam */
+                $col = $this->colArray[$i];
+                if (!$col->editable || !$col->thisTable || ($col->dbName === "ID_" . $this->dbName)) {
+                    continue;
+                }
+                $value = isset($post[$col->dbName]) ? $post[$col->dbName] : "";
+                if (!is_string($value)) {
+                    return "Некорректное значение поля «" . $col->rusName . "»";
+                }
+                $empty = (trim($value) === "");
+                // Пустой пароль при редактировании означает «не менять»
+                if ($col->required && $empty && !(($col->type == "encrypted") && ($oper == "edit"))) {
+                    return "Поле «" . $col->rusName . "» обязательно";
+                }
+                if ($empty) {
+                    continue;
+                }
+                if ($col->maxLength && (mb_strlen($value) > $col->maxLength)) {
+                    return "Поле «" . $col->rusName . "» длиннее " . (int)$col->maxLength . " символов";
+                }
+                if (($col->type == "photo") || ($col->type == "photos")) {
+                    $photos = json_decode($value, true);
+                    if (!is_array($photos) || ($photos !== array_values($photos))) {
+                        return "Некорректный список фотографий";
+                    }
+                    $dir = strtolower(str_replace("NL_", "", $this->dbName));
+                    foreach ($photos as $photo) {
+                        if (!is_string($photo) || !preg_match('#^/img/' . preg_quote($dir, '#') . '/[A-Za-z0-9_.-]+\.(jpe?g|png|gif|webp)$#i', $photo)) {
+                            return "Недопустимый путь фотографии";
+                        }
+                    }
+                    // Храним в каноническом виде
+                    $post[$col->dbName] = json_encode(array_values(array_unique($photos)), JSON_UNESCAPED_SLASHES);
+                } elseif ($col->type == "rich") {
+                    $delta = json_decode(rawurldecode($value), true);
+                    if (!is_array($delta) || !isset($delta["ops"]) || !is_array($delta["ops"])) {
+                        return "Некорректный формат описания";
+                    }
+                } elseif (($col->type == "integer") || ($col->type == "float") || ($col->type == "select")) {
+                    if (!is_numeric($value)) {
+                        return "Поле «" . $col->rusName . "» должно быть числом";
+                    }
+                }
+            }
+            return "";
         }
 
         public function get_query_left_joins() {

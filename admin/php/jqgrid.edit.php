@@ -5,6 +5,7 @@
 
     db_connect();
 
+    require_post();
     require_csrf();
     $tblName = require_table($_GET["tblName"] ?? "");
     $table = new ObjectTable($tblName);

@@ -6,6 +6,7 @@
     db_connect();
 
     require_auth();
+    require_post();
     require_csrf();
     $_SESSION["onlymy"] = (($_POST["onlymy"] ?? "0") == "1") ? "1" : "0";
 

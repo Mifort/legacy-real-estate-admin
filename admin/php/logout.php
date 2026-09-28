@@ -6,6 +6,7 @@
     db_connect();
 
     require_auth();
+    require_post();
     require_csrf();
     user_logout();
 

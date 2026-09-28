@@ -1,7 +1,10 @@
-# Каталог пользовательских загрузок: запрещаем исполнение любого серверного кода
-php_flag engine off
+# Каталог пользовательских загрузок: запрещаем исполнение любого серверного кода.
+# php_admin_flag в .htaccess недопустим (Apache отвечает 500), поэтому только php_flag.
 <IfModule mod_php.c>
-    php_admin_flag engine off
+    php_flag engine off
+</IfModule>
+<IfModule mod_php7.c>
+    php_flag engine off
 </IfModule>
 <FilesMatch "\.(php|phtml|php3|php4|php5|php7|phps|phar|pht|cgi|pl|py|asp|aspx|sh)$">
     <IfModule mod_authz_core.c>
