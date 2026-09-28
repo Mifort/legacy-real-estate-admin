@@ -8,8 +8,9 @@
 Требуется Docker (Docker Desktop / Docker Engine).
 
 ```bash
-cp .env.example .env          # при необходимости поменяйте порты/пароли
-docker compose up -d --build  # сборка и запуск
+python3 scripts/setup-secrets.py  # новый запуск: генерирует локальные секреты
+docker compose up -d --build
+docker compose exec -T web php scripts/set-admin-password.php < .local-secrets/admin-password
 ```
 
 При первом старте база инициализируется из `sql/testdb.sql` (уже содержит все изменения),
@@ -20,12 +21,24 @@ docker compose up -d --build  # сборка и запуск
 
 ### Учётные данные админки
 
-| Логин | Пароль             |
-|-------|--------------------|
-| admin | `REDACTED_LOCAL_SECRET` |
+Логин: `admin`. Случайный пароль хранится только в локальном файле
+`.local-secrets/admin-password` (права 0600). Для просмотра:
 
-Пароль хранится в БД зашифрованным через `AES_ENCRYPT` (ключ — константа `AESKEY`
-в `.env` / `php/config.php`).
+```bash
+cat .local-secrets/admin-password
+```
+
+`.env` содержит случайные пароли MySQL и ключ `AES_KEY`. Оба локальных пути
+исключены из Git и запрещены для HTTP-доступа. Не публикуйте их и не отправляйте
+вывод `docker compose config`: он может содержать подставленные секреты.
+
+Публичный дамп содержит admin с пустым шифротекстом: до выполнения команды
+`set-admin-password.php` вход невозможен. Пароль устанавливается через
+`AES_ENCRYPT` с ключом окружения. Веб-порт доступен только на `127.0.0.1`.
+
+Генератор предназначен для новой установки и отказывается заменять существующую
+конфигурацию. Для существующей БД изменение `.env` само по себе не меняет пароли
+MySQL. Изменение ключа AES требует перешифрования паролей пользователей.
 
 ## Состав
 
@@ -41,7 +54,7 @@ docker compose up -d --build  # сборка и запуск
 
 ```bash
 docker compose exec web bash
-docker compose exec db mysql -uroot -p"$DB_ROOT_PASSWORD" testdb
+docker compose exec db mysql -uroot -p testdb  # ввести локальный DB_ROOT_PASSWORD
 ```
 
 ## Отчёт

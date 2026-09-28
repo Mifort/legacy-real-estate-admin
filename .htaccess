@@ -1,3 +1,10 @@
+# Private configuration and maintenance files must never be served.
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteRule ^(scripts|\.local-secrets)(/|$) - [F,L]
+    RewriteRule ^(README\.md|REPORT\.md|\.env.*|composer)$ - [F,L,NC]
+</IfModule>
+
 # ----------------------------------------------------------------------
 # | Cross-origin images                                                |
 # ----------------------------------------------------------------------

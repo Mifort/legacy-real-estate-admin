@@ -1,2 +1,4 @@
--- Задача 1: пароль пользователю admin (AES_ENCRYPT, ключ из php/config.php)
-UPDATE `NL_USER` SET `NL_USER_PASSWORD` = AES_ENCRYPT('REDACTED_LOCAL_SECRET', 'REDACTED_LOCAL_SECRET') WHERE `NL_USER_LOGIN` = 'admin';
+-- The public dump intentionally contains no usable admin password.
+-- Set a local password with AES_ENCRYPT and the environment AES_KEY:
+-- docker compose exec -T web php scripts/set-admin-password.php < .local-secrets/admin-password
+-- No password or encryption key belongs in versioned SQL.

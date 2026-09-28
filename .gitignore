@@ -1,6 +1,9 @@
 /vendor/
 /templates_c/
 /.env
+/.env.*
+!/.env.example
+/.local-secrets/
 *:Zone.Identifier
 .idea/
 /composer

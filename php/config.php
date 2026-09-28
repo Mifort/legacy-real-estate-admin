@@ -1,10 +1,17 @@
 <?
-    // Параметры подключения берутся из окружения (docker-compose / .env), значения по умолчанию — для локального запуска
+    // Секреты обязательны: публичных значений по умолчанию нет.
+    foreach (["DB_PASSWORD", "AES_KEY"] as $secretName) {
+        if (getenv($secretName) === false || getenv($secretName) === "") {
+            error_log("Missing required environment variable: " . $secretName);
+            http_response_code(500);
+            exit("Не настроено окружение приложения");
+        }
+    }
     define("HOSTNAME", getenv("DB_HOST") ?: "localhost");
-    define("USERNAME", getenv("DB_USER") ?: "root");
-    define("PASSWORD", getenv("DB_PASSWORD") ?: "");
+    define("USERNAME", getenv("DB_USER") ?: "testdb");
+    define("PASSWORD", getenv("DB_PASSWORD"));
     define("DBNAME", getenv("DB_NAME") ?: "testdb");
-    define("AESKEY", getenv("AES_KEY") ?: "REDACTED_LOCAL_SECRET");
+    define("AESKEY", getenv("AES_KEY"));
 
     $mysqli = null;
 
