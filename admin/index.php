@@ -5,6 +5,7 @@
     
     db_connect();
     if ((isset($_POST["login"])) && (isset($_POST["password"]))) {
+        require_csrf();
         user_auth($_POST["login"], $_POST["password"]);
         header("Location: /admin/", true, 303);
         die();
@@ -15,16 +16,26 @@
     }
 ?>
 <!doctype html>
-<html lang="ru" class="html-<?= $page ?>">
+<html lang="ru" class="html-<?= html($page) ?>">
 <head>
     <meta charset="utf-8">
     <meta http-equiv="x-ua-compatible" content="ie=edge">
     <title>Административная панель</title>
     <meta name="viewport" content="width=700, maximum-scale=1.0, user-scalable=no">
+    <meta name="csrf-token" content="<?= html($_SESSION["csrf_token"]) ?>">
     <link rel="stylesheet" href="/admin/css/css.combined.020.css">
     <script src="/admin/js/js.combined.020.js"></script>
+    <script>
+        // Единый CSRF-токен для всех AJAX-запросов админки
+        window.CSRF_TOKEN = "<?= html($_SESSION["csrf_token"]) ?>";
+        if (window.jQuery) {
+            jQuery.ajaxSetup({
+                headers: { "X-CSRF-Token": window.CSRF_TOKEN }
+            });
+        }
+    </script>
 </head>
-<body class="admin admin-<?= $page ?>">
+<body class="admin admin-<?= html($page) ?>">
     <? includeAdminPartsByLvl(); ?>
     <script src="//api-maps.yandex.ru/2.1/?lang=ru_RU"></script>
 </body>

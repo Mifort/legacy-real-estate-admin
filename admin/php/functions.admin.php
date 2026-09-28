@@ -1,10 +1,79 @@
 <?
-    session_start();
+    if (session_status() !== PHP_SESSION_ACTIVE) {
+        session_set_cookie_params(["httponly" => true, "samesite" => "Strict"]);
+        session_start();
+    }
     $url = explode("?", $_SERVER["REQUEST_URI"], 5);
 
     $page_array = explode("/admin/", $url[0]);
     $page = rtrim($page_array[1], "/");
-    
+
+    // CSRF-токен, единый на сессию
+    if (empty($_SESSION["csrf_token"])) {
+        $_SESSION["csrf_token"] = bin2hex(random_bytes(32));
+    }
+
+    // Белые списки таблиц админки (защита от обращения к произвольным таблицам)
+    const ADMIN_ONLY_TABLES = ["NL_USER", "NL_VIEW", "NL_MATERIAL", "NL_HOUSES"];
+    const USER_TABLES = ["NL_PROP_RESALE"];
+
+    function is_authenticated() {
+        return isset($_SESSION["ID_NL_USER"]) && isset($_SESSION["ID_NL_USER_PERMISSION"]);
+    }
+
+    function is_admin() {
+        return is_authenticated() && ($_SESSION["ID_NL_USER_PERMISSION"] == "2");
+    }
+
+    function require_auth() {
+        if (!is_authenticated()) {
+            http_response_code(403);
+            die("Требуется авторизация");
+        }
+    }
+
+    function require_admin() {
+        require_auth();
+        if (!is_admin()) {
+            http_response_code(403);
+            die("Недостаточно прав");
+        }
+    }
+
+    // Проверка CSRF-токена для любых POST-запросов
+    function require_csrf() {
+        if (($_SERVER["REQUEST_METHOD"] ?? "GET") !== "POST") {
+            return;
+        }
+        $token = $_SERVER["HTTP_X_CSRF_TOKEN"] ?? ($_POST["csrf_token"] ?? "");
+        if (empty($_SESSION["csrf_token"]) || !is_string($token) || !hash_equals($_SESSION["csrf_token"], $token)) {
+            http_response_code(403);
+            die("Недействительный CSRF-токен");
+        }
+    }
+
+    // Проверяет право доступа к таблице (имя приходит из запроса) и возвращает его
+    function require_table($tblName) {
+        require_auth();
+        if (in_array($tblName, ADMIN_ONLY_TABLES, true)) {
+            require_admin();
+            return $tblName;
+        }
+        if (in_array($tblName, USER_TABLES, true)) {
+            return $tblName;
+        }
+        http_response_code(404);
+        die("Неизвестная таблица");
+    }
+
+    // Определение IP клиента (используется для журнала и троттлинга входа)
+    function client_ip() {
+        $ip = $_SERVER["REMOTE_ADDR"] ?? "unknown";
+        if (!filter_var($ip, FILTER_VALIDATE_IP)) {
+            $ip = "unknown";
+        }
+        return $ip;
+    }
 
     class ObjectParam {
         public $dbName;
@@ -309,7 +378,7 @@ function showOnlyMy(jqgrid, row) {
     ';
                 if ($_SESSION["ID_NL_USER_PERMISSION"] != "2") {
                     $return .= '
-    if (row["ID_NL_USER"] != "' . $_SESSION["NL_USER_SHORT"] . '") {
+    if (row["ID_NL_USER"] != ' . json_encode($_SESSION["NL_USER_SHORT"], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP | JSON_UNESCAPED_UNICODE) . ') {
         $("#edit_" + jqgrid + "_top, #del_" + jqgrid + "_top").hide();
     } else {
         $("#edit_" + jqgrid + "_top, #del_" + jqgrid + "_top").show();
@@ -387,7 +456,7 @@ function showOnlyMy(jqgrid, row) {
                     break;
             }
 
-            for ($i = 0; $i <= (count($this->colArray) / 2); $i++) {
+            for ($i = 0; $i < (count($this->colArray) / 2); $i++) {
                 /* @var $col ObjectParam */
                 $col = $this->colArray[$i];
                 if ($i > 0) {
@@ -504,7 +573,9 @@ function showOnlyMy(jqgrid, row) {
                         $res = db_query($query) or die(db_error($query));
                         if (db_num_rows($res) > 0) {
                             while ($row = db_fetch_assoc($res)) {
-                                $colModelEditOptions .= ";" . $row[str_replace("_PARENT", "", $col->dbName)] . ":" . mb_ereg_replace('"', '\\"', $row[$selectTableName . "_SHORT"]);
+                                $optId = (int)$row[str_replace("_PARENT", "", $col->dbName)];
+                                $optLabel = str_replace(array(";", ":", '"', "\\"), array(",", " ", "'", ""), (string)$row[$selectTableName . "_SHORT"]);
+                                $colModelEditOptions .= ";" . $optId . ":" . $optLabel;
                             }
                         }
                         $colModelEditOptions .= '"';
@@ -704,21 +775,28 @@ function showOnlyMy(jqgrid, row) {
             //if (isset($this->where) && ($this->where != false) && (trim($this->where) != "")) {
                 //$query = "SELECT " .
             //} else {
+                // Пароли (encrypted) НЕ расшифровываем в выборку — они не должны покидать сервер
                 $query = "SELECT *";
-                for ($i = 1; $i <= (count($this->colArray)); $i++) {
-                    /* @var $col ObjectParam */
-                    $col = $this->colArray[$i];
-                    if ($col->type == "encrypted") {
-                        $query .= ", AES_DECRYPT(" . $col->dbName . ",'" . AESKEY . "') AS " . $col->dbName . "_DECRYPTED";
-                    }
-                }
                 $query .= " FROM " . $this->dbName . " tbl " . $leftJoin . " WHERE " . $search_where;
                 if (isset($this->where) && ($this->where != false) && (trim($this->where) != "")) {
                     $query .= " AND " . $this->where;
                 }
-                $query .= " ORDER BY " . $sidx . " " . $sord;
+                // Сортировка только по известной колонке (белый список) и в фиксированном направлении
+                $sortCol = "ID_" . $this->dbName;
+                foreach ($this->colArray as $col) {
+                    if (is_object($col) && ($col->dbName === $sidx)) {
+                        $sortCol = $sidx;
+                        break;
+                    }
+                }
+                $sortCol = "tbl.`" . str_replace("`", "", $sortCol) . "`";
+                $sortDir = (strtoupper((string)$sord) === "DESC") ? "DESC" : "ASC";
+                $query .= " ORDER BY " . $sortCol . " " . $sortDir;
             //}
-            $query .= " LIMIT " . $limit * ($page - 1) . ", " . $limit;
+            $page = max(1, db_int($page));
+            $limit = db_int($limit);
+            if ($limit <= 0) { $limit = 50; }
+            $query .= " LIMIT " . ($limit * ($page - 1)) . ", " . $limit;
 
             $res = db_query($query) or die(db_error($query));
             $i = 0;
@@ -728,17 +806,18 @@ function showOnlyMy(jqgrid, row) {
                     $data[$i] = Array();
                     //array_push($data[$i], $row["ID_" . $this->dbName]);
                     //array_push($data[$i], ($i + 1) + (($page * $limit) - $limit));
-                    for ($j = 0; $j <= (count($this->colArray) / 2); $j++) {
+                    for ($j = 0; $j < (count($this->colArray) / 2); $j++) {
                         $col = $this->colArray[$j];
                         $rowName = $this->colArray[$j]->dbName;
+                        if ($col->type == "encrypted") {
+                            // пароль не отдаём клиенту
+                            array_push($data[$i], "");
+                            continue;
+                        }
                         if ($col->type == "select") {
                             $rowName = mb_ereg_replace("ID_", "", $rowName) . "_SHORT";
-                        } elseif ($col->type == "encrypted") {
-                            ;
-                            $rowName .= "_DECRYPTED";
                         }
-                        //echo $row[$rowName] . "\n";
-                        array_push($data[$i], $row[$rowName]);
+                        array_push($data[$i], $row[$rowName] ?? "");
                     }
                     $i++;
                 }
@@ -748,18 +827,11 @@ function showOnlyMy(jqgrid, row) {
         }
 
         public function showData() {
-            // Номер запришиваемой страницы
-            if (!isset($_GET['page'])) {
-                $page = 1;
-            } else {
-                $page = $_GET['page'];
-            }
+            // Номер запрашиваемой страницы
+            $page = max(1, (int)($_GET['page'] ?? 1));
             // Количество запрашиваемых записей
-            if (!isset($_GET['rows'])) {
-                $limit = 50;
-            } else {
-                $limit = $_GET['rows'];
-            }
+            $limit = (int)($_GET['rows'] ?? 50);
+            if ($limit <= 0) { $limit = 50; }
             // Поле, по которому следует производить сортировку
             $sidx = $_GET['sidx'];
             // Направление сортировки
@@ -768,37 +840,33 @@ function showOnlyMy(jqgrid, row) {
             } else {
                 $sord = $_GET['sord'];
             }
-            // Выполним запрос, который вернет суммарное кол-во записей в таблице
+            // Фильтры: колонка только из белого списка, значение — параметризовано
             $search_where = "(1=1)";
+            $colByName = array();
+            foreach ($this->colArray as $col) {
+                if (is_object($col)) { $colByName[$col->dbName] = $col; }
+            }
+            $likeTypes = array("string", "rich", "photo", "photos", "file", "date", "checkbox", "map");
             foreach ($_GET as $key => $value) {
-                if (strpos($key, "NL_") !== false) {
-                    $search_field = $key;
-                    if (strpos($key, "ID_") === 0) {
-                        $search_field = substr($key, 3) . "_SHORT";
-                    }
-                    if (strpos($key, "_from") !== false) {
-                        $search_field = str_replace("_from", "", $search_field);
-                        $search_value = "$search_field >= " . $value;
-                    } elseif (strpos($key, "_to") !== false) {
-                        $search_field = str_replace("_to", "", $search_field);
-                        $search_value = "$search_field <= " . $value;
-                    } else {
-                        $search_value = "$search_field = $value";
-                        if (strpos($key, "ID_") === 0) {
-                            $search_value = "$search_field LIKE '%" . $value . "%'";
-                        } else {
-                            foreach ($this->colArray as $col) {
-                                if ($col->dbName == $key) {
-                                    if (($col->type == "string") || ($col->type == "rich") || ($col->type == "photo") || ($col->type == "photos") || ($col->type == "file") || ($col->type == "date") || ($col->type == "checkbox") || ($col->type == "map")) {
-                                        $search_value = "$search_field LIKE '%" . $value . "%'";
-                                    }
-                                    break;
-                                }
-                            }
-                        }
-                    }
-
-                    $search_where .= " AND ($search_value)";
+                if (strpos($key, "NL_") === false) { continue; }
+                if (!is_string($value) || $value === "") { continue; }
+                $baseKey = $key; $op = "=";
+                if (substr($key, -5) === "_from") { $baseKey = substr($key, 0, -5); $op = ">="; }
+                elseif (substr($key, -3) === "_to") { $baseKey = substr($key, 0, -3); $op = "<="; }
+                if (!isset($colByName[$baseKey])) { continue; }
+                $col = $colByName[$baseKey];
+                $field = $baseKey;
+                if (strpos($baseKey, "ID_") === 0) {
+                    $field = substr($baseKey, 3) . "_SHORT";
+                }
+                $field = "`" . str_replace("`", "", $field) . "`";
+                if ($op !== "=") {
+                    if (!is_numeric($value)) { continue; }
+                    $search_where .= " AND ($field $op " . (0 + $value) . ")";
+                } elseif ((strpos($baseKey, "ID_") === 0) || in_array($col->type, $likeTypes, true)) {
+                    $search_where .= " AND ($field LIKE " . db_quote("%" . $value . "%") . ")";
+                } else {
+                    $search_where .= " AND ($field = " . db_quote($value) . ")";
                 }
             }
 
@@ -828,16 +896,16 @@ function showOnlyMy(jqgrid, row) {
             // Начало xml разметки
             $s = "<?xml version='1.0' encoding='utf-8'?>";
             $s .= "<rows>";
-            $s .= "<page>" . $page . "</page>";
-            $s .= "<total>" . $total_pages . "</total>";
-            $s .= "<records>" . $count . "</records>";
-            // Строки данных для таблицы
-            // Не забудьте обернуть текстовые данные в <![CDATA[]]>
+            $s .= "<page>" . (int)$page . "</page>";
+            $s .= "<total>" . (int)$total_pages . "</total>";
+            $s .= "<records>" . (int)$count . "</records>";
+            // Строки данных; экранируем возможный выход из CDATA
             if (count($data) > 0) {
                 for ($i = 0; $i < count($data); $i++) {
-                    $s .= '<row id="' . $data[$i][0] . '">';
+                    $s .= '<row id="' . html($data[$i][0]) . '">';
                     for ($j = 0; $j < count($data[$i]); $j++) {
-                        $s .= '<cell><![CDATA[' . $data[$i][$j] . ']]></cell>';
+                        $cell = str_replace("]]>", "]]]]><![CDATA[>", (string)$data[$i][$j]);
+                        $s .= '<cell><![CDATA[' . $cell . ']]></cell>';
                     }
                     $s .= "</row>";
                 }
@@ -861,8 +929,10 @@ function showOnlyMy(jqgrid, row) {
                 die();
             }
 
+            $res_cur = null;
+            $row_cur = array();
             if ($oper != "add") {
-                $query_cur = "SELECT * FROM " . $this->dbName . " WHERE ID_" . $this->dbName . " = " . $id;
+                $query_cur = "SELECT * FROM " . $this->dbName . " WHERE ID_" . $this->dbName . " = " . db_int($id);
                 $res_cur = db_query($query_cur) or die(db_error($query_cur));
                 $row_cur = db_fetch_assoc($res_cur);
 
@@ -873,41 +943,9 @@ function showOnlyMy(jqgrid, row) {
                 }
             }
 
-            $user_ip = 'unknown';
-            if (getenv('REMOTE_ADDR')) {
-                $user_ip = getenv('REMOTE_ADDR');
-            } elseif (getenv('HTTP_FORWARDED_FOR')) {
-                $user_ip = getenv('HTTP_FORWARDED_FOR');
-            } elseif (getenv('HTTP_X_FORWARDED_FOR')) {
-                $user_ip = getenv('HTTP_X_FORWARDED_FOR');
-            } elseif (getenv('HTTP_X_COMING_FROM')) {
-                $user_ip = getenv('HTTP_X_COMING_FROM');
-            } elseif (getenv('HTTP_VIA')) {
-                $user_ip = getenv('HTTP_VIA');
-            } elseif (getenv('HTTP_XROXY_CONNECTION')) {
-                $user_ip = getenv('HTTP_XROXY_CONNECTION');
-            } elseif (getenv('HTTP_CLIENT_IP')) {
-                $user_ip = getenv('HTTP_CLIENT_IP');
-            } else {
-                $user_ip = 'unknown';
-            }
-            if (15 < strlen($user_ip)) {
-                $ar = split(', ', $user_ip);
-                for ($i = sizeof($ar) - 1; $i > 0; $i--) {
-                    if ($ar[$i] != '' and !preg_match('/[a-zA-Zа-яА-Я]/', $ar[$i])) {
-                        $user_ip = $ar[$i];
-                        break;
-                    }
-                    if ($i == sizeof($ar) - 1) {
-                        $user_ip = 'unknown';
-                    }
-                }
-            }
-            if (preg_match('/[a-zA-Zа-яА-Я]/', $user_ip)) {
-                $user_ip = 'unknown';
-            }
+            $user_ip = client_ip();
             // log master
-            $query_log = "INSERT INTO NL_LOG(NL_LOG_DATE, NL_LOG_TIME, NL_LOG_IP, NL_LOG_IUD, NL_LOG_TABLE_NAME, ID_NL_USER) VALUES('" . date("Y.m.d") . "', '" . date("H:i:s") . "', '" . $user_ip . "', '" . $oper . "', '" . $this->dbName . "', " . $_SESSION["ID_NL_USER"] . " )";
+            $query_log = "INSERT INTO NL_LOG(NL_LOG_DATE, NL_LOG_TIME, NL_LOG_IP, NL_LOG_IUD, NL_LOG_TABLE_NAME, ID_NL_USER) VALUES(" . db_quote(date("Y.m.d")) . ", " . db_quote(date("H:i:s")) . ", " . db_quote($user_ip) . ", " . db_quote($oper) . ", " . db_quote($this->dbName) . ", " . db_int($_SESSION["ID_NL_USER"]) . ")";
             db_query($query_log) or die(db_error($query_log));
             $query_log = "SELECT LAST_INSERT_ID() AS ID_LOG";
             $res_log = db_query($query_log) or die(db_error($query_log));
@@ -920,45 +958,64 @@ function showOnlyMy(jqgrid, row) {
                 $col = $this->colArray[$i];
 
                 if (($col->editable) && ($col->thisTable)) {
-                    array_push($fields, $col->dbName);
+                    // Первичный ключ: используем проверенное серверное значение, не даём подменить
+                    if ($col->dbName === "ID_" . $this->dbName) {
+                        array_push($fields, $col->dbName);
+                        array_push($values, db_int($oper == "add" ? ($post[$col->dbName] ?? 0) : $id));
+                        continue;
+                    }
 
-                    if ((!isset($post[$col->dbName])) || (trim($post[$col->dbName]) == "")) {
+                    // Фактическое значение из формы; для не-админа принудительно ставим свой ID_NL_USER (защита от IDOR)
+                    $postVal = isset($post[$col->dbName]) ? $post[$col->dbName] : "";
+                    if (($col->dbName === "ID_NL_USER") && !is_admin()) {
+                        $postVal = $_SESSION["ID_NL_USER"];
+                    }
+
+                    // Пустой пароль при редактировании — оставляем прежний (поле не трогаем)
+                    if (($col->type == "encrypted") && ($oper == "edit") && (trim((string)$postVal) === "")) {
+                        continue;
+                    }
+
+                    array_push($fields, $col->dbName);
+                    if (trim((string)$postVal) === "") {
                         array_push($values, "NULL");
                     } elseif (($col->type == "string") || ($col->type == "rich") || ($col->type == "photo") || ($col->type == "photos") || ($col->type == "file") || ($col->type == "date") || ($col->type == "checkbox") || ($col->type == "map")) {
-                        array_push($values, "'" . $post[$col->dbName] . "'");
+                        array_push($values, db_quote($postVal));
                     } elseif ($col->type == "encrypted") {
-                        array_push($values, "AES_ENCRYPT('" . $post[$col->dbName] . "','" . AESKEY . "')");
+                        array_push($values, "AES_ENCRYPT(" . db_quote($postVal) . ", " . db_quote(AESKEY) . ")");
                     } else {
-                        array_push($values, $post[$col->dbName]);
+                        // числовые типы (integer/float/select)
+                        array_push($values, is_numeric($postVal) ? (string)(0 + $postVal) : "NULL");
                     }
 
                     if ($col->type != "encrypted") {
                         $valold = "''";
-                        if (db_num_rows($res_cur) > 0) {
-                            $valold = "'" . $row_cur[$col->dbName] . "'";
+                        if (($res_cur !== null) && (db_num_rows($res_cur) > 0)) {
+                            $valold = db_quote($row_cur[$col->dbName] ?? "");
                         }
                         $valnew = "''";
                         if ($oper != "del") {
-                            $valnew = "'" . $post[$col->dbName] . "'";
+                            $valnew = db_quote($postVal);
                         }
 
-                        $query_log_detail = "INSERT INTO NL_LOG_DETAIL(ID_NL_LOG, NL_LOG_DETAIL_OLD, NL_LOG_DETAIL_NEW, NL_LOG_DETAIL_FIELD) VALUES (" . $row_log["ID_LOG"] . ", " . $valold . "," . $valnew . ", '" . $col->dbName . "')";
+                        $query_log_detail = "INSERT INTO NL_LOG_DETAIL(ID_NL_LOG, NL_LOG_DETAIL_OLD, NL_LOG_DETAIL_NEW, NL_LOG_DETAIL_FIELD) VALUES (" . db_int($row_log["ID_LOG"]) . ", " . $valold . ", " . $valnew . ", " . db_quote($col->dbName) . ")";
                         db_query($query_log_detail) or die(db_error($query_log_detail));
                     }
                 }
 
                 // Удаляем лишние изображения
                 if (($col->type == "photo") || ($col->type == "photos")) {
-                    $trueId = $id;
-                    if ((isset($values[0])) && (trim($values[0]) != "") && ($values[0] != "NULL")) {
-                        $trueId = $values[0];
+                    $trueId = db_int($id);
+                    if (($oper == "add") && isset($values[0]) && is_numeric($values[0])) {
+                        $trueId = db_int($values[0]);
                     }
                     $imgsPath = $_SERVER["DOCUMENT_ROOT"] . "/img/objects/" . str_replace("NL_", "", $this->dbName) . "/";
                     foreach (glob($imgsPath . str_replace($this->dbName . "_", "", $col->dbName) . "_" . $trueId . "*.jpg") as $fullFileName) {
                         $fileName = mb_substr($fullFileName, mb_strrpos($fullFileName, "/") + 1);
                         $needDel = true;
                         if ($oper != "del") {
-                            $photos = json_decode($post[$col->dbName]);
+                            $photos = isset($post[$col->dbName]) ? json_decode($post[$col->dbName]) : null;
+                            if (!is_array($photos)) { $photos = array(); }
                             for ($ji = 0; $ji < count($photos); $ji++) {
                                 $curPhoto = mb_substr($photos[$ji], mb_strrpos($photos[$ji], "/") + 1);
                                 if ($curPhoto == $fileName) {
@@ -987,11 +1044,10 @@ function showOnlyMy(jqgrid, row) {
                     }
                     $query .= $fields[$i] . " = " . $values[$i];
                 }
-                $query .= " WHERE ID_" . $this->dbName . " = " . $id;
+                $query .= " WHERE ID_" . $this->dbName . " = " . db_int($id);
             } elseif ($oper == "del") {
-                $query = "DELETE FROM " . $this->dbName . " WHERE ID_" . $this->dbName . " = " . $id;
+                $query = "DELETE FROM " . $this->dbName . " WHERE ID_" . $this->dbName . " = " . db_int($id);
             }
-            echo $query;
             db_query($query) or die(db_error($query));
         }
 
@@ -1007,12 +1063,24 @@ function showOnlyMy(jqgrid, row) {
     }
 
     function user_auth($login, $pass) {
-        $id_user = $_SESSION["ID_NL_USER"] ? $_SESSION["ID_NL_USER"] : -1;
-        $query = "SELECT * FROM NL_USER au WHERE ((au.NL_USER_LOGIN = '" . $login . "') AND (au.NL_USER_PASSWORD = aes_encrypt('" . $pass . "','" . AESKEY . "')) OR (au.ID_NL_USER = " . $id_user . "))";
-        //echo $query;
+        // Троттлинг перебора: не более 5 неудачных попыток c одного IP за 15 минут
+        $ip = client_ip();
+        $ipq = db_quote($ip);
+        $resCnt = db_query("SELECT COUNT(*) AS CNT FROM NL_LOGIN_ATTEMPT WHERE NL_LOGIN_ATTEMPT_IP = $ipq AND NL_LOGIN_ATTEMPT_TIME > (NOW() - INTERVAL 15 MINUTE)");
+        if ($resCnt) {
+            $rowCnt = db_fetch_assoc($resCnt);
+            if ((int)$rowCnt["CNT"] >= 5) {
+                http_response_code(429);
+                die("Слишком много попыток входа. Повторите позже.");
+            }
+        }
+
+        $query = "SELECT * FROM NL_USER au WHERE (au.NL_USER_LOGIN = " . db_quote($login) . ") AND (au.NL_USER_PASSWORD = AES_ENCRYPT(" . db_quote($pass) . ", " . db_quote(AESKEY) . "))";
         $res = db_query($query) or die(db_error($query));
         if (db_num_rows($res) > 0) {
             $row = db_fetch_assoc($res);
+            session_regenerate_id(true);
+            db_query("DELETE FROM NL_LOGIN_ATTEMPT WHERE NL_LOGIN_ATTEMPT_IP = $ipq");
             $_SESSION["ID_NL_USER"] = $row["ID_NL_USER"];
             $_SESSION["NL_USER_LOGIN"] = $row["NL_USER_LOGIN"];
             $_SESSION["NL_USER_SHORT"] = $row["NL_USER_SHORT"];
@@ -1020,21 +1088,29 @@ function showOnlyMy(jqgrid, row) {
             $_SESSION["NL_USER_PHONE"] = $row["NL_USER_PHONE"];
             $_SESSION["ID_NL_USER_PERMISSION"] = $row["ID_NL_USER_PERMISSION"];
             $_SESSION["onlymy"] = "0";
+            return true;
         }
+        // Неудачная попытка — фиксируем для троттлинга
+        db_query("INSERT INTO NL_LOGIN_ATTEMPT (NL_LOGIN_ATTEMPT_IP, NL_LOGIN_ATTEMPT_TIME) VALUES ($ipq, NOW())");
+        return false;
     }
 
     function user_logout() {
-        unset($_SESSION["ID_NL_USER"]);
-        unset($_SESSION["NL_USER_LOGIN"]);
-        unset($_SESSION["NL_USER_SHORT"]);
-        unset($_SESSION["NL_USER_FULL"]);
-        unset($_SESSION["ID_NL_USER_PERMISSION"]);
+        $_SESSION = array();
+        if (ini_get("session.use_cookies")) {
+            $p = session_get_cookie_params();
+            setcookie(session_name(), "", time() - 42000, $p["path"], $p["domain"], $p["secure"], $p["httponly"]);
+        }
+        session_destroy();
     }
 
     function includeAdminPartsByLvl($wrap_start = "", $wrap_end = "") {
         global $page;
 
-        $main_file = $_SERVER["DOCUMENT_ROOT"] . "/admin/parts/" . $page . ".php";
+        // Белый список подключаемых частей (защита от LFI через URL)
+        $allowedParts = array("login", "main");
+        $safePage = in_array($page, $allowedParts, true) ? $page : "main";
+        $main_file = $_SERVER["DOCUMENT_ROOT"] . "/admin/parts/" . $safePage . ".php";
         if (file_exists($main_file)) {
             if ($wrap_start != "") {
                 echo $wrap_start;

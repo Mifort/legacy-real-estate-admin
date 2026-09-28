@@ -684,3 +684,17 @@ FileETag None
     RewriteCond %{REQUEST_FILENAME} !-f
     RewriteRule ^(.+)\.(\d+)\.(bmp|css|cur|gif|ico|jpe?g|js|png|svgz?|webp|webmanifest)$ $1.$3 [L]
 </IfModule>
+# ----------------------------------------------------------------------
+# | Блокировка служебных путей и заголовки безопасности (аудит)         |
+# ----------------------------------------------------------------------
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteRule ^(sql|docker|vendor|templates|templates_c|\.git)(/|$) - [F,L]
+    RewriteRule ^(composer\.(json|lock)|\.env.*|Makefile|REPORT\.md)$ - [F,L]
+</IfModule>
+
+<IfModule mod_headers.c>
+    Header set X-Content-Type-Options "nosniff"
+    Header set X-Frame-Options "SAMEORIGIN"
+    Header set Referrer-Policy "strict-origin-when-cross-origin"
+</IfModule>

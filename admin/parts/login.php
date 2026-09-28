@@ -1,6 +1,7 @@
 <h1>Выполните вход:</h1>
 <br/>
 <form action="/admin/login/" class="login" method="post">
+    <input type="hidden" name="csrf_token" value="<?= html($_SESSION["csrf_token"]) ?>"/>
     <label class="login__label" for="login">Логин:</label>
     <input id="login" name="login" class="login__login" type="text"/><br/><br/>
     <label class="login__label" for="password">Пароль:</label>

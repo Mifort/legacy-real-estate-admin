@@ -5,7 +5,8 @@
 
     db_connect();
 
-    $tblName = $_GET["tblName"];
+    require_csrf();
+    $tblName = require_table($_GET["tblName"] ?? "");
     $table = new ObjectTable($tblName);
 
     /*$id = -1;

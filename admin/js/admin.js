@@ -229,7 +229,8 @@ function dataInitFileFunction(el, dbName, colName, multiple, onlyPhoto, massDocs
             data: {
                 "table": dbName,
                 "col": colName,
-                "id": id
+                "id": id,
+                "csrf_token": window.CSRF_TOKEN
             },
             maxSize: FileAPI.MB * 70,
             maxFiles: 20, /*imageTransform: {
@@ -304,7 +305,8 @@ function dataInitFileFunction(el, dbName, colName, multiple, onlyPhoto, massDocs
 //  ------------------------------------- QUILL RICH EDITOR -------------------------------------
 function get_quill_elem(value, options) {
     //console.log("get_quill_elem");
-    var $div = $("<div id='" + options.id + "' class='g-quill' data-value='" + value + "'>");
+    var $div = $("<div class='g-quill'>");
+    $div.attr("id", options.id).attr("data-value", value);
     return $div[0];
 }
 

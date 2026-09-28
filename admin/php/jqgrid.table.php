@@ -5,7 +5,7 @@
 
     db_connect();
 
-    $tblName = $_GET["tblName"];
+    $tblName = require_table($_GET["tblName"] ?? "");
     $table = new ObjectTable($tblName);
 
     $table->renderTable();

@@ -6,16 +6,19 @@
     function db_connect() {
         global $mysqli;
 
+        mysqli_report(MYSQLI_REPORT_OFF);
         $mysqli = new mysqli(HOSTNAME, USERNAME, PASSWORD, DBNAME);
 
         if ($mysqli->connect_errno) {
-            printf("Ошибка подключения к базе: %s\n", $mysqli->connect_error);
+            // Подробности — только в лог, пользователю — общее сообщение
+            error_log("DB connect error: " . $mysqli->connect_error);
+            http_response_code(500);
+            echo "Ошибка подключения к базе данных";
             exit();
         }
 
-        if (!$mysqli->set_charset("utf8")) {
-            printf("Ошибка загрузки кодировки utf8: %s\n", $mysqli->error);
-            printf("Текущая кодировка: %s\n", $mysqli->character_set_name());
+        if (!$mysqli->set_charset("utf8mb4")) {
+            error_log("DB charset error: " . $mysqli->error);
         }
     }
 
@@ -42,13 +45,29 @@
     }
 
     function db_error($query) {
-        $q_err = "<br /><br />Ошибка в запросе:<br />" . $query . "<br /><br />";
-        return $q_err;
-        //global $mysqli;
-        //return $mysqli->error;
+        // Текст запроса и ошибки не показываем пользователю (раскрытие структуры БД), пишем в лог
+        global $mysqli;
+        error_log("DB query error: " . $mysqli->error . " | " . $query);
+        http_response_code(500);
+        return "Ошибка при работе с базой данных";
     }
 
     function db_real_escape_string($escapestr) {
         global $mysqli;
         return $mysqli->real_escape_string($escapestr);
+    }
+
+    // Экранированное строковое значение в кавычках для подстановки в SQL
+    function db_quote($value) {
+        return "'" . db_real_escape_string((string)$value) . "'";
+    }
+
+    // Целое значение для подстановки в SQL
+    function db_int($value) {
+        return (int)$value;
+    }
+
+    // Экранирование для вывода в HTML
+    function html($value) {
+        return htmlspecialchars((string)$value, ENT_QUOTES | ENT_SUBSTITUTE, "UTF-8");
     }

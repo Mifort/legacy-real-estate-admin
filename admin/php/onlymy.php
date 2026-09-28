@@ -5,7 +5,9 @@
 
     db_connect();
 
-    $_SESSION["onlymy"] = $_POST["onlymy"];
+    require_auth();
+    require_csrf();
+    $_SESSION["onlymy"] = (($_POST["onlymy"] ?? "0") == "1") ? "1" : "0";
 
     db_disconnect();
 ?>

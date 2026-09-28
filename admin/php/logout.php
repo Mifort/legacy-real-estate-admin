@@ -5,6 +5,8 @@
 
     db_connect();
 
+    require_auth();
+    require_csrf();
     user_logout();
 
     db_disconnect();

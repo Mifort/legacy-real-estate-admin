@@ -5,66 +5,77 @@
 
     db_connect();
 
-    $baseFileName = "";
-    if (isset($_FILES["files"])) {
+    // Загружать файлы может только авторизованный пользователь, с валидным CSRF-токеном
+    require_csrf();
+    $tbl = require_table($_REQUEST["table"] ?? "");
+
+    // Достаём загруженный файл (совместимо со старым форматом FileAPI)
+    if (isset($_FILES["files"]) && isset($_FILES["files"]["tmp_name"][0])) {
         $baseFileName = $_FILES["files"]["name"][0];
-    } else {
-        $baseFileName = $_FILES[0]["name"];
-    }
-
-    $baseTmpName = "";
-    $ext = "";
-    if (isset($_FILES["files"])) {
         $baseTmpName = $_FILES["files"]["tmp_name"][0];
-        $ext = $_FILES["files"]["name"][0];
-    } else {
+    } elseif (isset($_FILES[0])) {
+        $baseFileName = $_FILES[0]["name"];
         $baseTmpName = $_FILES[0]["tmp_name"];
-        $ext = $_FILES[0]["name"];
+    } else {
+        http_response_code(400);
+        die("Файл не получен");
     }
-    $ext = explode(".", $ext);
-    $ext = $ext[count($ext) - 1];
 
-    $blacklist = array(".php", ".phtml", ".php3", ".php4", ".php5");
-    foreach ($blacklist as $item) {
-        //for ($i = 0; $i < count($_FILES["files"]["name"]); $i++) {
-        if (preg_match("/$item\$/i", $baseFileName)) {
-            echo "Error: We do not allow uploading PHP files!\n";
-            die();
+    if (!is_uploaded_file($baseTmpName)) {
+        http_response_code(400);
+        die("Некорректная загрузка");
+    }
+
+    // Разрешаем только изображения: и по расширению (белый список), и по реальному содержимому
+    $allowedExt = array("jpg", "jpeg", "png", "gif", "webp");
+    $ext = strtolower(pathinfo($baseFileName, PATHINFO_EXTENSION));
+    if (!in_array($ext, $allowedExt, true)) {
+        http_response_code(415);
+        die("Разрешены только изображения (jpg, jpeg, png, gif, webp)");
+    }
+    $info = @getimagesize($baseTmpName);
+    $allowedMime = array("image/jpeg", "image/png", "image/gif", "image/webp");
+    if (($info === false) || !in_array($info["mime"] ?? "", $allowedMime, true)) {
+        http_response_code(415);
+        die("Файл не является изображением");
+    }
+
+    // Колонка — только из полей этой таблицы; каталог и имя формируем сами
+    $table = new ObjectTable($tbl);
+    $reqCol = $_REQUEST["col"] ?? "";
+    $colValid = false;
+    foreach ($table->colArray as $c) {
+        if (is_object($c) && $c->dbName === $reqCol && (($c->type === "photo") || ($c->type === "photos") || ($c->type === "file"))) {
+            $colValid = true;
+            break;
         }
-        //}
+    }
+    if (!$colValid) {
+        http_response_code(400);
+        die("Недопустимое поле");
     }
 
-    $tbl = $_REQUEST["table"];
-    $col = mb_ereg_replace($tbl . "_", "", $_REQUEST["col"]);
+    $col = mb_ereg_replace($tbl . "_", "", $reqCol);
     $dir = strtolower(str_replace("NL_", "", $tbl));
     $date = date('ymd_his', time());
-    $id = $_REQUEST["id"];
+    $id = db_int($_REQUEST["id"] ?? 0);
 
-    $strpos = mb_strrpos($baseTmpName, "/");
-    if ($strpos === false) {
-        $strpos = mb_strrpos($baseTmpName, "\\");
+    $baseDir = realpath($_SERVER["DOCUMENT_ROOT"] . "/img");
+    $targetDir = $baseDir . "/" . $dir;
+    if (!is_dir($targetDir)) {
+        mkdir($targetDir, 0755, true);
     }
 
-    //$tmpName = mb_ereg_replace(".tmp", "", mb_substr($baseTmpName, $strpos + 1));
-
-    //print_r($_FILES["files"]);
-
-    //$files_array = Array();
-    //for ($i = 0; $i < count($_FILES["files"]["name"]); $i++) {
-    $filename = "/img/" . $dir . "/" . $col . "_" . $id . "_" /*. $tmpName . "_"*/ . $date . ".$ext";
+    $filename = "/img/" . $dir . "/" . $col . "_" . $id . "_" . $date . "." . $ext;
     $uploadfile = $_SERVER["DOCUMENT_ROOT"] . $filename;
 
     if (move_uploaded_file($baseTmpName, $uploadfile)) {
-        //array_push($files_array, $filename);
         echo '"' . $filename . '"';
     } else {
-        echo "Error: File uploading failed.\n";
-        die();
+        http_response_code(500);
+        error_log("File upload failed for " . $uploadfile);
+        die("Ошибка загрузки файла");
     }
-    //}
 
-    //echo json_encode($files_array);
-
-    //print_r($_SERVER);
     db_disconnect();
 ?>
