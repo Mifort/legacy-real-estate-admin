@@ -992,21 +992,19 @@ function showOnlyMy(jqgrid, row) {
 
             $row_cur = array();
             if ($oper != "add") {
+                // Изменения одной записи выполняются строго по очереди: блокировка держится
+                // до конца операции, включая удаление файлов (снимается и при обрыве соединения)
+                $lockName = db_quote("rec_" . DBNAME . "_" . $this->dbName . "_" . db_int($id));
+                $resLock = db_query("SELECT GET_LOCK(" . $lockName . ", 10) AS L") or die(db_error("GET_LOCK"));
+                if ((int)db_fetch_assoc($resLock)["L"] !== 1) {
+                    http_response_code(503);
+                    die("Запись сейчас изменяется, повторите попытку");
+                }
+
                 $query_cur = "SELECT * FROM " . $this->dbName . " WHERE ID_" . $this->dbName . " = " . db_int($id);
                 $res_cur = db_query($query_cur) or die(db_error($query_cur));
                 $row_cur = db_fetch_assoc($res_cur);
-                if (!$row_cur) {
-                    http_response_code(404);
-                    die("Запись не найдена");
-                }
-
-                if ($_SESSION["ID_NL_USER_PERMISSION"] == "3") {
-                    http_response_code(403);
-                    die("Недостаточно прав");
-                } elseif (($_SESSION["ID_NL_USER_PERMISSION"] == "1") && ($row_cur["ID_NL_USER"] != $_SESSION["ID_NL_USER"])) {
-                    http_response_code(403);
-                    die("Нельзя изменять чужую запись");
-                }
+                $this->checkRowAccess($row_cur);
             }
 
             // Серверная проверка значений (клиентские required/maxLength можно обойти),
@@ -1042,10 +1040,16 @@ function showOnlyMy(jqgrid, row) {
                 $query_lock = "SELECT * FROM " . $this->dbName . " WHERE ID_" . $this->dbName . " = " . db_int($id) . " FOR UPDATE";
                 $res_lock = db_query($query_lock) or $this->rollbackAndDie($query_lock);
                 $row_cur = db_fetch_assoc($res_lock);
-                if (!$row_cur) {
-                    db_query("ROLLBACK");
-                    http_response_code(404);
-                    die("Запись не найдена");
+                // Права и данные — повторно по заблокированной строке: запись могли изменить
+                // после первой проверки (например, сменить владельца)
+                $this->checkRowAccess($row_cur, true);
+                if ($oper != "del") {
+                    $error = $this->validatePost($oper, db_int($id), $post, $row_cur);
+                    if ($error !== "") {
+                        db_query("ROLLBACK");
+                        http_response_code(400);
+                        die($error);
+                    }
                 }
             }
 
@@ -1154,24 +1158,52 @@ function showOnlyMy(jqgrid, row) {
             // Данные сохранены. Файл, на который ссылается другая запись, не удаляем. Сбой
             // удаления оставит лишний файл (мусор, его уберёт очистка), но не потерю данных
             foreach ($filesToDelete as $photo => $file) {
-                if ($this->photoReferencedElsewhere($photo, db_int($id))) {
+                // Проверяем все записи, включая эту: параллельная правка могла вернуть фото
+                if ($this->photoReferenced($photo)) {
                     continue;
                 }
                 if (is_file($file) && !@unlink($file)) {
                     error_log("saveData: could not delete " . $file);
                 }
             }
+
+            if ($oper != "add") {
+                db_query("SELECT RELEASE_LOCK(" . $lockName . ")");
+            }
         }
 
-        // Ссылается ли на файл какая-либо запись, кроме $excludeId (по всем фото-колонкам таблицы)
-        private function photoReferencedElsewhere($photo, $excludeId) {
+        // Доступ текущего пользователя к существующей записи; при отказе — ответ и выход
+        private function checkRowAccess($row, $inTransaction = false) {
+            $code = 0;
+            $message = "";
+            if (!$row) {
+                $code = 404;
+                $message = "Запись не найдена";
+            } elseif ($_SESSION["ID_NL_USER_PERMISSION"] == "3") {
+                $code = 403;
+                $message = "Недостаточно прав";
+            } elseif (($_SESSION["ID_NL_USER_PERMISSION"] == "1") && ($row["ID_NL_USER"] != $_SESSION["ID_NL_USER"])) {
+                $code = 403;
+                $message = "Нельзя изменять чужую запись";
+            }
+            if ($code !== 0) {
+                if ($inTransaction) {
+                    db_query("ROLLBACK");
+                }
+                http_response_code($code);
+                die($message);
+            }
+        }
+
+        // Ссылается ли на файл какая-либо запись таблицы (по всем фото-колонкам)
+        private function photoReferenced($photo) {
             $like = db_quote('%"' . addcslashes($photo, '%_\\') . '"%');
             for ($i = 0; $i < (count($this->colArray) / 2); $i++) {
                 $col = $this->colArray[$i];
                 if (($col->type != "photo") && ($col->type != "photos")) {
                     continue;
                 }
-                $q = "SELECT 1 FROM " . $this->dbName . " WHERE ID_" . $this->dbName . " <> " . db_int($excludeId) . " AND " . $col->dbName . " LIKE " . $like . " LIMIT 1";
+                $q = "SELECT 1 FROM " . $this->dbName . " WHERE " . $col->dbName . " LIKE " . $like . " LIMIT 1";
                 $res = db_query($q);
                 // Если проверить не удалось — считаем, что файл используется, и не удаляем
                 if (!$res || (db_num_rows($res) > 0)) {
