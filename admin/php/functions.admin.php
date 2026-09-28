@@ -989,7 +989,7 @@ function showOnlyMy(jqgrid, row) {
                     } elseif (($col->type == "string") || ($col->type == "rich") || ($col->type == "photo") || ($col->type == "photos") || ($col->type == "file") || ($col->type == "date") || ($col->type == "checkbox") || ($col->type == "map")) {
                         array_push($values, db_quote($postVal));
                     } elseif ($col->type == "encrypted") {
-                        array_push($values, "AES_ENCRYPT(" . db_quote($postVal) . ", " . db_quote(AESKEY) . ")");
+                        array_push($values, db_password_sql($postVal));
                     } else {
                         // числовые типы (integer/float/select)
                         array_push($values, is_numeric($postVal) ? (string)(0 + $postVal) : "NULL");
@@ -1082,10 +1082,21 @@ function showOnlyMy(jqgrid, row) {
             }
         }
 
-        $query = "SELECT * FROM NL_USER au WHERE (au.NL_USER_LOGIN = " . db_quote($login) . ") AND (au.NL_USER_PASSWORD = AES_ENCRYPT(" . db_quote($pass) . ", " . db_quote(AESKEY) . "))";
-        $res = db_query($query) or die(db_error($query));
-        if (db_num_rows($res) > 0) {
-            $row = db_fetch_assoc($res);
+        // Расшифровываем сохранённый хеш и сверяем через password_verify
+        $query = "SELECT au.*, " . db_password_decrypt_sql("au.NL_USER_PASSWORD") . " AS NL_USER_PASSWORD_DEC FROM NL_USER au WHERE au.NL_USER_LOGIN = " . db_quote($login) . " LIMIT 1";
+        $res = db_query($query) or die(db_error("user_auth"));
+        $row = db_fetch_assoc($res);
+        $legacy = false;
+        $ok = $row && password_check($row["NL_USER_PASSWORD_DEC"], $pass, $legacy);
+        if (!$row) {
+            // Выравниваем время ответа для несуществующего логина
+            password_verify((string)$pass, '$2y$12$D/8O8FISVQty9P7iMPCEiOsjUMN1Mk8iK0Ftc3HGrsj2EEote1MOK');
+        }
+        if ($ok) {
+            // Запись в старом формате (AES от самого пароля) переводим в новый
+            if ($legacy) {
+                db_query("UPDATE NL_USER SET NL_USER_PASSWORD = " . db_password_sql($pass) . " WHERE ID_NL_USER = " . db_int($row["ID_NL_USER"]));
+            }
             session_regenerate_id(true);
             db_query("DELETE FROM NL_LOGIN_ATTEMPT WHERE NL_LOGIN_ATTEMPT_IP = $ipq");
             $_SESSION["ID_NL_USER"] = $row["ID_NL_USER"];

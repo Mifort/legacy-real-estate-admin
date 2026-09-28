@@ -1,6 +1,6 @@
 <?
-    // Секреты обязательны: публичных значений по умолчанию нет.
-    foreach (["DB_PASSWORD", "AES_KEY"] as $secretName) {
+    // Пароль БД обязателен: публичного значения по умолчанию нет.
+    foreach (["DB_PASSWORD"] as $secretName) {
         if (getenv($secretName) === false || getenv($secretName) === "") {
             error_log("Missing required environment variable: " . $secretName);
             http_response_code(500);
@@ -11,7 +11,10 @@
     define("USERNAME", getenv("DB_USER") ?: "testdb");
     define("PASSWORD", getenv("DB_PASSWORD"));
     define("DBNAME", getenv("DB_NAME") ?: "testdb");
-    define("AESKEY", getenv("AES_KEY"));
+    // Ключ AES_ENCRYPT для паролей пользователей (по заданию — в этом файле).
+    // Шифруется не сам пароль, а его password_hash, поэтому знание ключа
+    // не раскрывает пароли. Переменная окружения AES_KEY может его переопределить.
+    define("AESKEY", getenv("AES_KEY") ?: "aes_some_key_to_testdb777");
 
     $mysqli = null;
 

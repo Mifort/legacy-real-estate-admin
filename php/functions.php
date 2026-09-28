@@ -47,6 +47,8 @@
     function db_error($query) {
         // Текст запроса и ошибки не показываем пользователю (раскрытие структуры БД), пишем в лог
         global $mysqli;
+        // Ключ AES и хеши паролей в лог не пишем
+        $query = preg_replace('/AES_(EN|DE)CRYPT\((.*?)\)/s', 'AES_$1CRYPT(<redacted>)', (string)$query);
         error_log("DB query error: " . $mysqli->error . " | " . $query);
         http_response_code(500);
         return "Ошибка при работе с базой данных";
@@ -70,4 +72,42 @@
     // Экранирование для вывода в HTML
     function html($value) {
         return htmlspecialchars((string)$value, ENT_QUOTES | ENT_SUBSTITUTE, "UTF-8");
+    }
+
+    /* ==========================================================================
+       PASSWORD FUNCTIONS
+       Пароль хранится как AES_ENCRYPT(password_hash(пароль), AESKEY):
+       по заданию используется aes_encrypt с ключом из config.php, но даже при
+       утечке ключа и дампа расшифровывается только bcrypt-хеш, а не пароль.
+       ========================================================================== */
+
+    // SQL-выражение для записи пароля в NL_USER_PASSWORD
+    function db_password_sql($password) {
+        $hash = password_hash((string)$password, PASSWORD_DEFAULT);
+        return "AES_ENCRYPT(" . db_quote($hash) . ", " . db_quote(AESKEY) . ")";
+    }
+
+    // SQL-выражение для чтения: расшифровывает сохранённое значение (хеш)
+    function db_password_decrypt_sql($column) {
+        return "AES_DECRYPT(" . $column . ", " . db_quote(AESKEY) . ")";
+    }
+
+    // Проверка пароля по расшифрованному значению. Возвращает true/false.
+    // $legacy выставляется в true, если запись в старом формате
+    // AES_ENCRYPT(пароль) — её нужно перезаписать в новом формате.
+    function password_check($decrypted, $password, &$legacy = false) {
+        $legacy = false;
+        if (!is_string($decrypted) || $decrypted === "") {
+            return false;
+        }
+        $info = password_get_info($decrypted);
+        if (($info["algo"] ?? null) !== null && ($info["algo"] ?? 0) !== 0) {
+            return password_verify((string)$password, $decrypted);
+        }
+        // Старый формат: внутри AES лежал сам пароль
+        if (hash_equals($decrypted, (string)$password)) {
+            $legacy = true;
+            return true;
+        }
+        return false;
     }

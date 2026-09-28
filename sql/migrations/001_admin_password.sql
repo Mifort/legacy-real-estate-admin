@@ -1,4 +1,5 @@
 -- The public dump intentionally contains no usable admin password.
--- Set a local password with AES_ENCRYPT and the environment AES_KEY:
+-- Set a local password: stored as AES_ENCRYPT(password_hash(password), AESKEY),
+-- AESKEY is defined in php/config.php (optionally overridden by AES_KEY):
 -- docker compose exec -T web php scripts/set-admin-password.php < .local-secrets/admin-password
 -- No password or encryption key belongs in versioned SQL.

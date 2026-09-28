@@ -17,8 +17,9 @@ if (!$result || (int)db_fetch_assoc($result)['n'] !== 1) {
     fwrite(STDERR, "Expected exactly one admin account.\n");
     exit(1);
 }
-$query = "UPDATE NL_USER SET NL_USER_PASSWORD = AES_ENCRYPT(" . db_quote($password)
-    . ", " . db_quote(AESKEY) . ") WHERE NL_USER_LOGIN = 'admin'";
+// AES_ENCRYPT(password_hash(пароль), AESKEY) — см. db_password_sql() в php/functions.php
+$query = "UPDATE NL_USER SET NL_USER_PASSWORD = " . db_password_sql($password)
+    . " WHERE NL_USER_LOGIN = 'admin'";
 if (!db_query($query)) {
     // Do not log a query containing the password/key.
     fwrite(STDERR, "Could not update admin password.\n");

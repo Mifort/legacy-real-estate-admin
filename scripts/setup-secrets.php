@@ -21,7 +21,6 @@ $values = [
     'DB_NAME' => 'testdb', 'DB_USER' => 'testdb',
     'DB_PASSWORD' => bin2hex(random_bytes(32)),
     'DB_ROOT_PASSWORD' => bin2hex(random_bytes(32)),
-    'AES_KEY' => bin2hex(random_bytes(32)),
 ];
 $env = '';
 foreach ($values as $name => $value) {

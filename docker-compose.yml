@@ -10,7 +10,7 @@ services:
       DB_USER: ${DB_USER:-testdb}
       DB_PASSWORD: ${DB_PASSWORD:?Generate secrets first - see README.md}
       DB_NAME: ${DB_NAME:-testdb}
-      AES_KEY: ${AES_KEY:?Generate secrets first - see README.md}
+      AES_KEY: ${AES_KEY:-}
     depends_on:
       db:
         condition: service_healthy
