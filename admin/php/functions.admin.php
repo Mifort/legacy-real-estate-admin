@@ -93,6 +93,7 @@
         public $render = false;
         public $editHidden = true;
         public $width = 120;
+        public $private = false; // поле видно только владельцу записи и администратору
     }
 
     class ObjectTable {
@@ -182,6 +183,7 @@
                     $colObject->type = "string";
                     $colObject->render = false;
                     $colObject->maxLength = 255;
+                    $colObject->private = true;
                     break;
 
                 // СПРАВОЧНИКОВ ПОЛЬЗОВАТЕЛЕЙ
@@ -574,7 +576,7 @@ function showOnlyMy(jqgrid, row) {
                         if (db_num_rows($res) > 0) {
                             while ($row = db_fetch_assoc($res)) {
                                 $optId = (int)$row[str_replace("_PARENT", "", $col->dbName)];
-                                $optLabel = str_replace(array(";", ":", '"', "\\"), array(",", " ", "'", ""), (string)$row[$selectTableName . "_SHORT"]);
+                                $optLabel = str_replace(array(";", ":", '"', "\\", "<", ">", "/"), array(",", " ", "'", "", "", "", ""), (string)$row[$selectTableName . "_SHORT"]);
                                 $colModelEditOptions .= ";" . $optId . ":" . $optLabel;
                             }
                         }
@@ -811,6 +813,11 @@ function showOnlyMy(jqgrid, row) {
                         $rowName = $this->colArray[$j]->dbName;
                         if ($col->type == "encrypted") {
                             // пароль не отдаём клиенту
+                            array_push($data[$i], "");
+                            continue;
+                        }
+                        // Приватные поля (контакт собственника) — только владельцу и админу
+                        if ($col->private && !is_admin() && ((($row["ID_NL_USER"] ?? null)) != ($_SESSION["ID_NL_USER"] ?? null))) {
                             array_push($data[$i], "");
                             continue;
                         }

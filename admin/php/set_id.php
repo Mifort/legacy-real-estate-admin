@@ -5,6 +5,10 @@
 
     db_connect();
 
+    if (($_SERVER["REQUEST_METHOD"] ?? "GET") !== "POST") {
+        http_response_code(405);
+        die("Метод не поддерживается");
+    }
     require_csrf();
     $tbl = require_table($_REQUEST["table"] ?? "");
 
