@@ -1,0 +1,37 @@
+services:
+  web:
+    build: ./docker/php
+    ports:
+      - "${WEB_PORT:-8080}:80"
+    volumes:
+      - ./:/var/www/html
+    environment:
+      DB_HOST: db
+      DB_USER: ${DB_USER:-testdb}
+      DB_PASSWORD: ${DB_PASSWORD:-REDACTED_LOCAL_SECRET}
+      DB_NAME: ${DB_NAME:-testdb}
+      AES_KEY: ${AES_KEY:-REDACTED_LOCAL_SECRET}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:-REDACTED_LOCAL_SECRET}
+      MYSQL_DATABASE: ${DB_NAME:-testdb}
+      MYSQL_USER: ${DB_USER:-testdb}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-REDACTED_LOCAL_SECRET}
+    volumes:
+      - ./sql/testdb.sql:/docker-entrypoint-initdb.d/01-testdb.sql:ro
+      - ./docker/mysql/my.cnf:/etc/mysql/conf.d/app.cnf:ro
+      - db_data:/var/lib/mysql
+    ports:
+      - "127.0.0.1:${DB_PORT:-33066}:3306"
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-p${DB_ROOT_PASSWORD:-REDACTED_LOCAL_SECRET}"]
+      interval: 5s
+      retries: 30
+
+volumes:
+  db_data:

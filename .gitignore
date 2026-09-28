@@ -1,0 +1,5 @@
+/vendor/
+/templates_c/
+/.env
+*:Zone.Identifier
+.idea/
