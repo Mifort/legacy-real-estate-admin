@@ -154,6 +154,18 @@
                     $colObject->type = "select";
                     $colObject->render = true;
                     break;
+                case "ID_NL_HOUSES":
+                    $colObject->dbName = "ID_NL_HOUSES";
+                    $colObject->rusName = "Тип дома";
+                    $colObject->type = "select";
+                    $colObject->render = true;
+                    break;
+                case "ID_NL_MATERIAL":
+                    $colObject->dbName = "ID_NL_MATERIAL";
+                    $colObject->rusName = "Материал дома";
+                    $colObject->type = "select";
+                    $colObject->render = true;
+                    break;
                 case "NL_FLOOR":
                     $colObject->rusName = "Этаж";
                     $colObject->type = "string";
@@ -236,8 +248,16 @@
                     $colNames = ["NL_VIEW_SHORT"];
                     $table = $this->getTableColArrayByColumnNames($tableName, $colNames);
                     break;
+                case "NL_MATERIAL":
+                    $colNames = ["NL_MATERIAL_SHORT"];
+                    $table = $this->getTableColArrayByColumnNames($tableName, $colNames);
+                    break;
+                case "NL_HOUSES":
+                    $colNames = ["NL_HOUSES_SHORT", "ID_NL_MATERIAL"];
+                    $table = $this->getTableColArrayByColumnNames($tableName, $colNames);
+                    break;
                 case "NL_PROP_RESALE":
-                    $colNames = ["NL_PROP_RESALE_AREA_FULL", "NL_PROP_RESALE_ADDRESS", "NL_PROP_RESALE_FLOOR", "NL_PROP_RESALE_COST_TOTAL", "NL_PROP_RESALE_PHONE_OWNER", "ID_NL_VIEW", "ID_NL_USER", "NL_PROP_RESALE_PHONE", "NL_PROP_RESALE_PHOTO_URLS", "NL_PROP_RESALE_DESCRIPTION"];
+                    $colNames = ["NL_PROP_RESALE_AREA_FULL", "NL_PROP_RESALE_ADDRESS", "NL_PROP_RESALE_FLOOR", "NL_PROP_RESALE_COST_TOTAL", "NL_PROP_RESALE_PHONE_OWNER", "ID_NL_VIEW", "ID_NL_HOUSES", "ID_NL_MATERIAL", "ID_NL_USER", "NL_PROP_RESALE_PHONE", "NL_PROP_RESALE_PHOTO_URLS", "NL_PROP_RESALE_DESCRIPTION"];
                     $table = $this->getTableColArrayByColumnNames($tableName, $colNames);
                     break;
             }
@@ -250,8 +270,11 @@
                 case "NL_USER":
                     return ["NL_USER_PERMISSION"];
                     break;
+                case "NL_HOUSES":
+                    return ["NL_MATERIAL"];
+                    break;
                 case "NL_PROP_RESALE":
-                    return ["NL_VIEW", "NL_USER"];
+                    return ["NL_VIEW", "NL_HOUSES", "NL_MATERIAL", "NL_USER"];
                     break;
                 default:
                     return [];
