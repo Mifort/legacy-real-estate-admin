@@ -1,0 +1,140 @@
+# Отчёт по тестовому заданию TestDB
+
+Проект перенесён в `~/projects/testII` и оформлен как git-репозиторий. Первый коммит —
+исходный legacy как есть, дальше по одному коммиту на каждый этап, чтобы все изменения
+были видны в diff.
+
+История коммитов:
+
+```
+Import legacy project testdb.lc as-is
+Add Docker environment (php 8.2-apache + mysql 8.0), read DB config from env
+Task 1: set admin password via AES_ENCRYPT
+Task 2: add NL_MATERIAL and NL_HOUSES dictionaries, link them to NL_PROP_RESALE
+Task 3: security audit fixes
+Task 4: landing page on Smarty + nadar/quill-delta-parser
+Task 5: refresh landing compile dir + updated database dump
++ docs & docker entrypoint
+```
+
+## Окружение (Docker)
+
+Задание предполагало работу в контейнерах, поэтому добавлено:
+
+- `docker/php/Dockerfile` — `php:8.2-apache`, расширения `mysqli`/`zip`, включены модули
+  `rewrite/include/headers/expires`, `AllowOverride All`, скрыта версия сервера
+  (`ServerTokens Prod`, `expose_php=Off`). Через `entrypoint.sh` при старте выполняется
+  `composer install`, если нет `vendor/`.
+- `docker-compose.yml` — сервисы `web` (порт 8080) и `db` (`mysql:8.0`). Дамп
+  `sql/testdb.sql` монтируется как init-скрипт. Приложение работает от отдельного
+  пользователя БД, не под `root`.
+- `php/config.php` теперь читает параметры подключения и ключ AES из переменных окружения
+  (`.env`), значения по умолчанию совпадают с исходными.
+
+Проверено: `docker compose up -d --build` на чистом томе поднимает рабочее приложение
+без ручных шагов (в т.ч. `composer install` и загрузка данных).
+
+## Задача 1. Пароль пользователю admin
+
+Пароль задаётся через `AES_ENCRYPT` с ключом из конфигурации
+(`sql/migrations/001_admin_password.sql`) и попал в итоговый дамп:
+
+```sql
+UPDATE NL_USER SET NL_USER_PASSWORD = AES_ENCRYPT('REDACTED_LOCAL_SECRET', 'REDACTED_LOCAL_SECRET')
+WHERE NL_USER_LOGIN = 'admin';
+```
+
+Логин `admin` / пароль `REDACTED_LOCAL_SECRET`. Вход в `/admin/` проверен.
+
+## Задача 2. Справочники «Материал дома» и «Тип дома»
+
+`sql/migrations/002_houses_material.sql`:
+
+- `NL_MATERIAL` (`ID_NL_MATERIAL`, `NL_MATERIAL_SHORT`) — по образцу `NL_VIEW`.
+- `NL_HOUSES` (`ID_NL_HOUSES`, `NL_HOUSES_SHORT`, `ID_NL_MATERIAL` + FK на `NL_MATERIAL`) —
+  тип дома связан с материалом.
+- В `NL_PROP_RESALE` добавлены `ID_NL_HOUSES` и `ID_NL_MATERIAL` (индексы + FK).
+- Заполнены тестовыми данными (5 материалов, 5 типов домов, +4 квартиры с описаниями
+  в формате Quill Delta, существующей квартире проставлены связи).
+
+Изменения в админке:
+
+- `admin/php/functions.admin.php`
+  - `getMainTableCol` — добавлены поля `ID_NL_HOUSES` («Тип дома») и `ID_NL_MATERIAL`
+    («Материал дома») как `select`.
+  - `getTableColArray` — наборы полей для `NL_MATERIAL`, `NL_HOUSES`, и в `NL_PROP_RESALE`
+    добавлены оба новых поля.
+  - `getTableLeftJoins` — `NL_HOUSES → [NL_MATERIAL]`,
+    `NL_PROP_RESALE → [NL_VIEW, NL_HOUSES, NL_MATERIAL, NL_USER]`.
+- `admin/parts/dicts.php` — вкладки «Материал дома» и «Тип дома».
+
+Проверено: справочники редактируются, у типа дома выбирается материал, при
+добавлении/редактировании квартиры доступны выпадающие списки «Тип дома» и «Материал дома».
+
+## Задача 3. Аудит безопасности
+
+Ключевые вспомогательные средства добавлены в `php/functions.php`
+(`db_quote()`, `db_int()`, `html()`) и в `admin/php/functions.admin.php`
+(`require_auth()`, `require_admin()`, `require_csrf()`, `require_table()`, `client_ip()`).
+
+| # | Уязвимость | Где | Как эксплуатировалось | Исправление | Проверка |
+|---|-----------|-----|-----------------------|-------------|----------|
+| 1 | SQL-инъекция при входе | `user_auth` | `login = admin' OR 1=1 -- ` → вход без пароля | Параметризация через `db_quote`, убрана ветка `OR ID_NL_USER=...` | `curl` с payload → остаётся неавторизован (303 на login) |
+| 2 | SQL-инъекции в гриде | `showData`/`getData` (фильтры, `sidx`, `sord`, `page`, `rows`) | инъекция через query-параметры | Белые списки колонок и направления сортировки, `db_quote`/`db_int` | инъекция в `sidx`/фильтр не влияет на выборку |
+| 3 | SQL-инъекции при записи | `saveData`, `set_id.php`, `select.get.php` | инъекция через значения формы, `id`, имя таблицы | Все значения через `db_quote`/`db_int`, таблицы — по белому списку | запись/чтение работают, инъекция экранируется |
+| 4 | Нет авторизации на эндпоинтах | `admin/php/*.php`, `parts/*.php` | прямой запрос к `jqgrid.show.php?tblName=NL_USER` отдавал данные | `require_auth`/`require_admin`/`require_table` на каждом эндпоинте | без сессии → `403` |
+| 5 | Утечка паролей | грид `NL_USER` | `AES_DECRYPT` уходил на клиент | Пароли не расшифровываются в выборку; пустой пароль при edit не меняется | в ответе `NL_USER` пароля нет (0 вхождений) |
+| 6 | Загрузка произвольных файлов (RCE) | `file.upload.php` | загрузка `.php`/`.phar`, path traversal через `table/col/id` | Auth+CSRF, белый список расширений и MIME (`getimagesize`), генерируемое имя, `img/.htaccess` запрещает исполнение кода | загрузка `shell.php` → `415`, без CSRF → `403` |
+| 7 | Хранимый/отражённый XSS | XML-грид, `$page`, `NL_USER_SHORT`, Quill `data-value`, опции select | скрипт в данных выполнялся в админке | Экранирование (`html()`, `json_encode`, защита `]]>`), `data-value` через `attr()` | payload выводится как текст |
+| 8 | CSRF | edit/del/upload/onlymy/logout/login | сторонний сайт мог выполнить действие | Токен в сессии, `<meta>` + `$.ajaxSetup` header, `require_csrf()` | POST без токена → `403` |
+| 9 | Небезопасные сессии | вход/выход | фиксация сессии, cookie без флагов | `session_regenerate_id(true)`, `session_destroy` + очистка cookie, `HttpOnly`/`SameSite` | вход выдаёт новый id |
+| 10 | Перебор паролей | вход | без ограничений | Таблица `NL_LOGIN_ATTEMPT`, блокировка после 5 неудач за 15 минут (`429`) | серия неудач → блокировка |
+| 11 | IDOR / подмена владельца и PK | `saveData` | пользователь мог назначить чужой `ID_NL_USER` или сменить `id` записи | Не-админу принудительно ставится свой `ID_NL_USER`; первичный ключ берётся из проверенного `$id` | правка чужой записи невозможна |
+| 12 | LFI через URL | `includeAdminPartsByLvl` | `parts/<произвольное>.php` из URL | Белый список частей (`login`, `main`) | посторонняя часть не подключается |
+| 13 | Раскрытие информации | `db_error`, `echo $query`, ошибки подключения | тексты SQL и структура БД в ответе | Ошибки только в `error_log`, клиенту — общее сообщение | в ответе нет SQL |
+| 14 | Доступ к служебным файлам | web-root | `/sql/testdb.sql`, `/composer.json`, `/vendor/`, `/.env` | Блокировка в `.htaccess` + заголовки безопасности | все перечисленные → `403` |
+| 15 | Совместимость/устойчивость PHP 8 | разное | `split()`, выход за границы массива, `json_decode(null)` | Заменено/исправлено, добавлены проверки | `php -l` чисто, лог без warning |
+
+Дополнительно: отдельный пользователь БД вместо `root` без пароля; секреты вынесены в env.
+
+### Рекомендации (в отчёте, без реализации)
+
+- Хранить пароли необратимым хешем (`password_hash`/argon2) вместо обратимого `AES`.
+  Оставлено `AES_ENCRYPT` по условию задания.
+- Обновить устаревшие фронтенд-библиотеки (jQuery 1.12.4, jqGrid).
+- Включить HTTPS/HSTS на боевом окружении.
+- Не доверять `X-Forwarded-For` без доверенного прокси.
+
+## Задача 4. Лендинг
+
+`index.php` собирает данные через существующие функции `db_query`/`db_fetch_assoc`:
+
+- дома (`NL_HOUSES` + материал + число квартир каждого типа);
+- квартиры (`NL_PROP_RESALE` + вид/тип/материал, без контакта собственника).
+
+Описание квартиры хранится как Quill Delta (URL-encoded JSON) и рендерится через
+`nadar/quill-delta-parser` (`escapeInput = true`, `javascript:`-ссылки нейтрализуются
+самой библиотекой). Вывод — через Smarty 5 (`setEscapeHtml(true)`), HTML-описание —
+единственное поле с `nofilter`. Пути к фото ограничены `^/img/...`.
+
+Проверено: лендинг отображает типы домов и квартиры, форматированное описание, а XSS
+в тексте описания (тег `<script>`, ссылка `javascript:`) экранируется/нейтрализуется.
+
+## Задача 5. Дамп и репозиторий
+
+`sql/testdb.sql` перегенерирован (`mysqldump`, utf8mb4, с `SET NAMES`) и уже содержит новые
+таблицы, связи, пароль admin и таблицу троттлинга — на чистом томе приложение
+поднимается без ручных миграций. Пошаговые скрипты сохранены в `sql/migrations/`.
+Публикация в удалённый git не требуется (по договорённости) — репозиторий локальный.
+
+## Задача 6 и применение ИИ
+
+Задача выполнялась с активным использованием ИИ (Claude) с последующей перепроверкой:
+
+- Разбор legacy-кода, поиск уязвимостей и генерация исправлений — с ручной проверкой
+  каждого изменения (`php -l`, точечные правки с сохранением стиля и переносов строк).
+- Все ключевые сценарии проверены вживую в контейнерах через `curl` (вход, права,
+  CSRF, инъекции, загрузка файлов, доступ к служебным путям, рендер лендинга).
+- Рендер Smarty + Quill и обработка XSS проверены отдельным прогоном с вредоносными
+  данными.
+- Итоговый diff дополнительно проверялся статически и на предмет регрессий.
