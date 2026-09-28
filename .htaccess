@@ -690,7 +690,7 @@ FileETag None
 <IfModule mod_rewrite.c>
     RewriteEngine On
     RewriteRule ^(sql|docker|vendor|templates|templates_c|\.git)(/|$) - [F,L]
-    RewriteRule ^(composer\.(json|lock)|\.env.*|Makefile|REPORT\.md)$ - [F,L]
+    RewriteRule ^(docker-compose\.ya?ml|composer\.(json|lock)|\.env.*|Makefile|REPORT\.md)$ - [F,L]
 </IfModule>
 
 <IfModule mod_headers.c>

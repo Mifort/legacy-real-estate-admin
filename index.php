@@ -92,9 +92,10 @@
 
     db_disconnect();
 
-    $compileDir = $_SERVER["DOCUMENT_ROOT"] . "/templates_c";
+    // Каталог компиляции — во временной папке (гарантированно доступен на запись веб-серверу)
+    $compileDir = sys_get_temp_dir() . "/testdb_smarty";
     if (!is_dir($compileDir)) {
-        mkdir($compileDir, 0775, true);
+        mkdir($compileDir, 0777, true);
     }
     $smarty = new Smarty();
     $smarty->setTemplateDir($_SERVER["DOCUMENT_ROOT"] . "/templates");

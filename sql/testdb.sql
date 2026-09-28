@@ -1,136 +1,287 @@
-/*
- Navicat Premium Data Transfer
+-- TestDB — итоговый дамп (обновлённая база: NL_HOUSES, NL_MATERIAL, связи, пароль admin, троттлинг)
+-- Кодировка: utf8mb4. Загружается автоматически при первом `docker compose up`.
 
- Source Server         : localhost
- Source Server Type    : MySQL
- Source Server Version : 50720
- Source Host           : localhost:3306
- Source Schema         : testdb
+-- MySQL dump 10.13  Distrib 8.0.46, for Linux (x86_64)
+--
+-- Host: localhost    Database: testdb
+-- ------------------------------------------------------
+-- Server version	8.0.46
 
- Target Server Type    : MySQL
- Target Server Version : 50720
- File Encoding         : 65001
+/*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
+/*!40101 SET @OLD_CHARACTER_SET_RESULTS=@@CHARACTER_SET_RESULTS */;
+/*!40101 SET @OLD_COLLATION_CONNECTION=@@COLLATION_CONNECTION */;
+/*!50503 SET NAMES utf8mb4 */;
+/*!40103 SET @OLD_TIME_ZONE=@@TIME_ZONE */;
+/*!40103 SET TIME_ZONE='+00:00' */;
+/*!40014 SET @OLD_UNIQUE_CHECKS=@@UNIQUE_CHECKS, UNIQUE_CHECKS=0 */;
+/*!40014 SET @OLD_FOREIGN_KEY_CHECKS=@@FOREIGN_KEY_CHECKS, FOREIGN_KEY_CHECKS=0 */;
+/*!40101 SET @OLD_SQL_MODE=@@SQL_MODE, SQL_MODE='NO_AUTO_VALUE_ON_ZERO' */;
+/*!40111 SET @OLD_SQL_NOTES=@@SQL_NOTES, SQL_NOTES=0 */;
 
- Date: 01/12/2019 14:49:24
-*/
+--
+-- Table structure for table `NL_HOUSES`
+--
 
-SET NAMES utf8mb4;
-SET FOREIGN_KEY_CHECKS = 0;
+DROP TABLE IF EXISTS `NL_HOUSES`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `NL_HOUSES` (
+  `ID_NL_HOUSES` int NOT NULL AUTO_INCREMENT,
+  `NL_HOUSES_SHORT` varchar(25) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `ID_NL_MATERIAL` int DEFAULT NULL,
+  PRIMARY KEY (`ID_NL_HOUSES`) USING BTREE,
+  KEY `ID_NL_MATERIAL` (`ID_NL_MATERIAL`) USING BTREE,
+  CONSTRAINT `nl_houses_ibfk_1` FOREIGN KEY (`ID_NL_MATERIAL`) REFERENCES `NL_MATERIAL` (`ID_NL_MATERIAL`) ON DELETE RESTRICT ON UPDATE RESTRICT
+) ENGINE=InnoDB AUTO_INCREMENT=6 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
 
--- ----------------------------
--- Table structure for NL_LOG
--- ----------------------------
+--
+-- Dumping data for table `NL_HOUSES`
+--
+
+LOCK TABLES `NL_HOUSES` WRITE;
+/*!40000 ALTER TABLE `NL_HOUSES` DISABLE KEYS */;
+INSERT INTO `NL_HOUSES` VALUES (1,'Сталинка',1),(2,'Хрущёвка',2),(3,'Новостройка',3),(4,'Таунхаус',4),(5,'Частный дом',5);
+/*!40000 ALTER TABLE `NL_HOUSES` ENABLE KEYS */;
+UNLOCK TABLES;
+
+--
+-- Table structure for table `NL_LOG`
+--
+
 DROP TABLE IF EXISTS `NL_LOG`;
-CREATE TABLE `NL_LOG`  (
-  `ID_NL_LOG` int(11) NOT NULL AUTO_INCREMENT,
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `NL_LOG` (
+  `ID_NL_LOG` int NOT NULL AUTO_INCREMENT,
   `NL_LOG_DATE` date NOT NULL,
-  `NL_LOG_TIME` time(0) NOT NULL,
-  `NL_LOG_IP` varchar(255) NOT NULL,
-  `NL_LOG_IUD` varchar(255) NOT NULL,
-  `NL_LOG_TABLE_NAME` varchar(255) NOT NULL,
-  `ID_NL_USER` int(11) NOT NULL,
+  `NL_LOG_TIME` time NOT NULL,
+  `NL_LOG_IP` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `NL_LOG_IUD` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `NL_LOG_TABLE_NAME` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `ID_NL_USER` int NOT NULL,
   PRIMARY KEY (`ID_NL_LOG`) USING BTREE,
-  INDEX `ID_NL_USER`(`ID_NL_USER`) USING BTREE,
+  KEY `ID_NL_USER` (`ID_NL_USER`) USING BTREE,
   CONSTRAINT `NL_LOG_IBFK_1` FOREIGN KEY (`ID_NL_USER`) REFERENCES `NL_USER` (`ID_NL_USER`) ON DELETE CASCADE ON UPDATE CASCADE
-) ENGINE = InnoDB AUTO_INCREMENT = 1;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
 
--- ----------------------------
--- Table structure for NL_LOG_DETAIL
--- ----------------------------
+--
+-- Dumping data for table `NL_LOG`
+--
+
+LOCK TABLES `NL_LOG` WRITE;
+/*!40000 ALTER TABLE `NL_LOG` DISABLE KEYS */;
+/*!40000 ALTER TABLE `NL_LOG` ENABLE KEYS */;
+UNLOCK TABLES;
+
+--
+-- Table structure for table `NL_LOGIN_ATTEMPT`
+--
+
+DROP TABLE IF EXISTS `NL_LOGIN_ATTEMPT`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `NL_LOGIN_ATTEMPT` (
+  `ID_NL_LOGIN_ATTEMPT` int NOT NULL AUTO_INCREMENT,
+  `NL_LOGIN_ATTEMPT_IP` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `NL_LOGIN_ATTEMPT_TIME` datetime NOT NULL,
+  PRIMARY KEY (`ID_NL_LOGIN_ATTEMPT`) USING BTREE,
+  KEY `ip_time` (`NL_LOGIN_ATTEMPT_IP`,`NL_LOGIN_ATTEMPT_TIME`) USING BTREE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Dumping data for table `NL_LOGIN_ATTEMPT`
+--
+
+LOCK TABLES `NL_LOGIN_ATTEMPT` WRITE;
+/*!40000 ALTER TABLE `NL_LOGIN_ATTEMPT` DISABLE KEYS */;
+/*!40000 ALTER TABLE `NL_LOGIN_ATTEMPT` ENABLE KEYS */;
+UNLOCK TABLES;
+
+--
+-- Table structure for table `NL_LOG_DETAIL`
+--
+
 DROP TABLE IF EXISTS `NL_LOG_DETAIL`;
-CREATE TABLE `NL_LOG_DETAIL`  (
-  `ID_NL_LOG_DETAIL` int(11) NOT NULL AUTO_INCREMENT,
-  `ID_NL_LOG` int(11) NOT NULL,
-  `NL_LOG_DETAIL_OLD` varchar(2550) NOT NULL,
-  `NL_LOG_DETAIL_NEW` varchar(2550) NOT NULL,
-  `NL_LOG_DETAIL_FIELD` varchar(255) NOT NULL,
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `NL_LOG_DETAIL` (
+  `ID_NL_LOG_DETAIL` int NOT NULL AUTO_INCREMENT,
+  `ID_NL_LOG` int NOT NULL,
+  `NL_LOG_DETAIL_OLD` varchar(2550) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `NL_LOG_DETAIL_NEW` varchar(2550) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `NL_LOG_DETAIL_FIELD` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
   PRIMARY KEY (`ID_NL_LOG_DETAIL`) USING BTREE,
-  INDEX `ID_NL_LOG`(`ID_NL_LOG`) USING BTREE,
+  KEY `ID_NL_LOG` (`ID_NL_LOG`) USING BTREE,
   CONSTRAINT `NL_LOG_DETAIL_IBFK_1` FOREIGN KEY (`ID_NL_LOG`) REFERENCES `NL_LOG` (`ID_NL_LOG`) ON DELETE CASCADE ON UPDATE CASCADE
-) ENGINE = InnoDB AUTO_INCREMENT = 1;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
 
--- ----------------------------
--- Table structure for NL_PROP_RESALE
--- ----------------------------
+--
+-- Dumping data for table `NL_LOG_DETAIL`
+--
+
+LOCK TABLES `NL_LOG_DETAIL` WRITE;
+/*!40000 ALTER TABLE `NL_LOG_DETAIL` DISABLE KEYS */;
+/*!40000 ALTER TABLE `NL_LOG_DETAIL` ENABLE KEYS */;
+UNLOCK TABLES;
+
+--
+-- Table structure for table `NL_MATERIAL`
+--
+
+DROP TABLE IF EXISTS `NL_MATERIAL`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `NL_MATERIAL` (
+  `ID_NL_MATERIAL` int NOT NULL AUTO_INCREMENT,
+  `NL_MATERIAL_SHORT` varchar(25) COLLATE utf8mb4_unicode_ci NOT NULL,
+  PRIMARY KEY (`ID_NL_MATERIAL`) USING BTREE
+) ENGINE=InnoDB AUTO_INCREMENT=6 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
+-- Dumping data for table `NL_MATERIAL`
+--
+
+LOCK TABLES `NL_MATERIAL` WRITE;
+/*!40000 ALTER TABLE `NL_MATERIAL` DISABLE KEYS */;
+INSERT INTO `NL_MATERIAL` VALUES (1,'Кирпич'),(2,'Панель'),(3,'Монолит'),(4,'Газобетон'),(5,'Дерево');
+/*!40000 ALTER TABLE `NL_MATERIAL` ENABLE KEYS */;
+UNLOCK TABLES;
+
+--
+-- Table structure for table `NL_PROP_RESALE`
+--
+
 DROP TABLE IF EXISTS `NL_PROP_RESALE`;
-CREATE TABLE `NL_PROP_RESALE`  (
-  `ID_NL_PROP_RESALE` int(11) NOT NULL AUTO_INCREMENT,
-  `ID_NL_VIEW` int(11) NULL DEFAULT NULL,
-  `NL_PROP_RESALE_FLOOR` varchar(25) NULL DEFAULT NULL,
-  `NL_PROP_RESALE_AREA_FULL` decimal(6, 2) NOT NULL,
-  `NL_PROP_RESALE_PHOTO_URLS` varchar(5100) NULL DEFAULT NULL,
-  `NL_PROP_RESALE_COST_TOTAL` int(11) NULL DEFAULT NULL,
-  `NL_PROP_RESALE_ADDRESS` varchar(2550) NULL DEFAULT NULL,
-  `NL_PROP_RESALE_DESCRIPTION` varchar(5100) NULL DEFAULT NULL,
-  `ID_NL_USER` int(11) NULL DEFAULT NULL,
-  `NL_PROP_RESALE_PHONE` varchar(50) NULL DEFAULT NULL,
-  `NL_PROP_RESALE_PHONE_OWNER` varchar(255) NULL DEFAULT NULL,
-  `NL_PROP_RESALE_DATE_INSERT` timestamp(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0),
-  `NL_PROP_RESALE_DATE_UPDATE` timestamp(0) NOT NULL DEFAULT CURRENT_TIMESTAMP(0) ON UPDATE CURRENT_TIMESTAMP(0),
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `NL_PROP_RESALE` (
+  `ID_NL_PROP_RESALE` int NOT NULL AUTO_INCREMENT,
+  `ID_NL_VIEW` int DEFAULT NULL,
+  `ID_NL_HOUSES` int DEFAULT NULL,
+  `ID_NL_MATERIAL` int DEFAULT NULL,
+  `NL_PROP_RESALE_FLOOR` varchar(25) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `NL_PROP_RESALE_AREA_FULL` decimal(6,2) NOT NULL,
+  `NL_PROP_RESALE_PHOTO_URLS` varchar(5100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `NL_PROP_RESALE_COST_TOTAL` int DEFAULT NULL,
+  `NL_PROP_RESALE_ADDRESS` varchar(2550) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `NL_PROP_RESALE_DESCRIPTION` varchar(5100) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `ID_NL_USER` int DEFAULT NULL,
+  `NL_PROP_RESALE_PHONE` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `NL_PROP_RESALE_PHONE_OWNER` varchar(255) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
+  `NL_PROP_RESALE_DATE_INSERT` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `NL_PROP_RESALE_DATE_UPDATE` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`ID_NL_PROP_RESALE`) USING BTREE,
-  INDEX `ID_NL_VIEW`(`ID_NL_VIEW`) USING BTREE,
-  CONSTRAINT `nl_prop_resale_ibfk_1` FOREIGN KEY (`ID_NL_VIEW`) REFERENCES `NL_VIEW` (`ID_NL_VIEW`) ON DELETE RESTRICT ON UPDATE RESTRICT
-) ENGINE = InnoDB AUTO_INCREMENT = 5;
+  KEY `ID_NL_VIEW` (`ID_NL_VIEW`) USING BTREE,
+  KEY `ID_NL_HOUSES` (`ID_NL_HOUSES`) USING BTREE,
+  KEY `ID_NL_MATERIAL` (`ID_NL_MATERIAL`) USING BTREE,
+  CONSTRAINT `nl_prop_resale_ibfk_1` FOREIGN KEY (`ID_NL_VIEW`) REFERENCES `NL_VIEW` (`ID_NL_VIEW`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `nl_prop_resale_ibfk_2` FOREIGN KEY (`ID_NL_HOUSES`) REFERENCES `NL_HOUSES` (`ID_NL_HOUSES`) ON DELETE RESTRICT ON UPDATE RESTRICT,
+  CONSTRAINT `nl_prop_resale_ibfk_3` FOREIGN KEY (`ID_NL_MATERIAL`) REFERENCES `NL_MATERIAL` (`ID_NL_MATERIAL`) ON DELETE RESTRICT ON UPDATE RESTRICT
+) ENGINE=InnoDB AUTO_INCREMENT=8 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
 
--- ----------------------------
--- Records of NL_PROP_RESALE
--- ----------------------------
-INSERT INTO `NL_PROP_RESALE` VALUES (3, NULL, '1', 555.00, '[\"/img/prop_resale/PHOTO_URLS_3_191201_024304.jpg\"]', 1000000, 'Россия, Краснодарский край, Анапа, Советская улица ', '%7B%22ops%22%3A%5B%7B%22insert%22%3A%22%D0%A5%D0%BE%D1%80%D0%BE%D1%88%D0%B0%D1%8F%20%D0%BA%D0%B2%D0%B0%D1%80%D1%82%D0%B8%D1%80%D0%B0%5Cn%22%7D%5D%7D', 1, '+79282601474', NULL, '2019-12-01 14:44:02', '2019-12-01 14:44:02');
+--
+-- Dumping data for table `NL_PROP_RESALE`
+--
 
--- ----------------------------
--- Table structure for NL_USER
--- ----------------------------
+LOCK TABLES `NL_PROP_RESALE` WRITE;
+/*!40000 ALTER TABLE `NL_PROP_RESALE` DISABLE KEYS */;
+INSERT INTO `NL_PROP_RESALE` VALUES (3,2,3,3,'1',555.00,'[\"/img/prop_resale/PHOTO_URLS_3_191201_024304.jpg\"]',1000000,'Россия, Краснодарский край, Анапа, Советская улица ','%7B%22ops%22%3A%5B%7B%22insert%22%3A%22%D0%A5%D0%BE%D1%80%D0%BE%D1%88%D0%B0%D1%8F%20%D0%BA%D0%B2%D0%B0%D1%80%D1%82%D0%B8%D1%80%D0%B0%5Cn%22%7D%5D%7D',1,'+79282601474',NULL,'2019-12-01 14:44:02','2026-09-28 07:04:33'),(4,1,3,1,'5',42.50,NULL,5200000,'Россия, Краснодарский край, Анапа, Пионерский проспект, 57','%7B%22ops%22%3A%5B%7B%22insert%22%3A%22%D0%A1%D0%B2%D0%B5%D1%82%D0%BB%D0%B0%D1%8F%20%D0%BA%D0%B2%D0%B0%D1%80%D1%82%D0%B8%D1%80%D0%B0%20%D1%81%20%D0%B2%D0%B8%D0%B4%D0%BE%D0%BC%20%D0%BD%D0%B0%20%D0%BC%D0%BE%D1%80%D0%B5%22%7D%2C%7B%22attributes%22%3A%7B%22header%22%3A3%7D%2C%22insert%22%3A%22%5Cn%22%7D%2C%7B%22insert%22%3A%22%D0%94%D0%BE%20%D0%BF%D0%BB%D1%8F%D0%B6%D0%B0%20%22%7D%2C%7B%22attributes%22%3A%7B%22bold%22%3Atrue%7D%2C%22insert%22%3A%225%20%D0%BC%D0%B8%D0%BD%D1%83%D1%82%22%7D%2C%7B%22insert%22%3A%22%20%D0%BF%D0%B5%D1%88%D0%BA%D0%BE%D0%BC.%5Cn%D0%A1%D0%B2%D0%B5%D0%B6%D0%B8%D0%B9%20%D1%80%D0%B5%D0%BC%D0%BE%D0%BD%D1%82%22%7D%2C%7B%22attributes%22%3A%7B%22list%22%3A%22bullet%22%7D%2C%22insert%22%3A%22%5Cn%22%7D%2C%7B%22insert%22%3A%22%D0%9E%D1%81%D1%82%D0%B0%D1%91%D1%82%D1%81%D1%8F%20%D0%BC%D0%B5%D0%B1%D0%B5%D0%BB%D1%8C%20%D0%B8%20%D1%82%D0%B5%D1%85%D0%BD%D0%B8%D0%BA%D0%B0%22%7D%2C%7B%22attributes%22%3A%7B%22list%22%3A%22bullet%22%7D%2C%22insert%22%3A%22%5Cn%22%7D%5D%7D',1,'+79280000001',NULL,'2026-09-28 07:04:33','2026-09-28 07:04:33'),(5,2,1,1,'2',64.00,NULL,7800000,'Россия, Краснодарский край, Анапа, улица Горького, 12','%7B%22ops%22%3A%5B%7B%22insert%22%3A%22%D0%9F%D1%80%D0%BE%D1%81%D1%82%D0%BE%D1%80%D0%BD%D0%B0%D1%8F%20%22%7D%2C%7B%22attributes%22%3A%7B%22italic%22%3Atrue%7D%2C%22insert%22%3A%22%D1%81%D1%82%D0%B0%D0%BB%D0%B8%D0%BD%D0%BA%D0%B0%22%7D%2C%7B%22insert%22%3A%22%20%D1%81%20%D0%B2%D1%8B%D1%81%D0%BE%D0%BA%D0%B8%D0%BC%D0%B8%20%D0%BF%D0%BE%D1%82%D0%BE%D0%BB%D0%BA%D0%B0%D0%BC%D0%B8%20%283%2C2%20%D0%BC%29.%5Cn%D0%A2%D0%B8%D1%85%D0%B8%D0%B9%20%D0%B4%D0%B2%D0%BE%D1%80%2C%20%D1%80%D1%8F%D0%B4%D0%BE%D0%BC%20%D0%BF%D0%B0%D1%80%D0%BA%20%D0%B8%20%D1%88%D0%BA%D0%BE%D0%BB%D0%B0.%5Cn%22%7D%5D%7D',1,'+79280000002',NULL,'2026-09-28 07:04:33','2026-09-28 07:04:33'),(6,2,2,2,'4',31.20,NULL,3100000,'Россия, Краснодарский край, Анапа, улица Ленина, 150','%7B%22ops%22%3A%5B%7B%22insert%22%3A%22%D0%A3%D1%8E%D1%82%D0%BD%D0%B0%D1%8F%20%D0%BE%D0%B4%D0%BD%D0%BE%D0%BA%D0%BE%D0%BC%D0%BD%D0%B0%D1%82%D0%BD%D0%B0%D1%8F%20%D0%BA%D0%B2%D0%B0%D1%80%D1%82%D0%B8%D1%80%D0%B0%20%D0%B2%20%D0%BF%D0%B0%D0%BD%D0%B5%D0%BB%D1%8C%D0%BD%D0%BE%D0%BC%20%D0%B4%D0%BE%D0%BC%D0%B5.%5Cn%22%7D%2C%7B%22attributes%22%3A%7B%22underline%22%3Atrue%7D%2C%22insert%22%3A%22%D0%A2%D0%BE%D1%80%D0%B3%20%D1%83%D0%BC%D0%B5%D1%81%D1%82%D0%B5%D0%BD%22%7D%2C%7B%22insert%22%3A%22.%5Cn%22%7D%5D%7D',1,'+79280000003',NULL,'2026-09-28 07:04:33','2026-09-28 07:04:33'),(7,1,4,4,'1',120.00,NULL,14500000,'Россия, Краснодарский край, Анапа, Витязево, улица Черноморская, 3','%7B%22ops%22%3A%5B%7B%22insert%22%3A%22%D0%A2%D0%B0%D1%83%D0%BD%D1%85%D0%B0%D1%83%D1%81%20%D0%B2%20%D0%B4%D0%B2%D1%83%D1%85%20%D1%83%D1%80%D0%BE%D0%B2%D0%BD%D1%8F%D1%85%2C%20%D1%81%D0%B2%D0%BE%D0%B9%20%D1%83%D1%87%D0%B0%D1%81%D1%82%D0%BE%D0%BA%202%20%D1%81%D0%BE%D1%82%D0%BA%D0%B8.%5Cn%22%7D%2C%7B%22attributes%22%3A%7B%22link%22%3A%22https%3A%5C%2F%5C%2Fyandex.ru%5C%2Fmaps%5C%2F%22%7D%2C%22insert%22%3A%22%D0%9F%D0%BE%D1%81%D0%BC%D0%BE%D1%82%D1%80%D0%B5%D1%82%D1%8C%20%D0%BD%D0%B0%20%D0%BA%D0%B0%D1%80%D1%82%D0%B5%22%7D%2C%7B%22insert%22%3A%22%5Cn%22%7D%5D%7D',1,'+79280000004',NULL,'2026-09-28 07:04:33','2026-09-28 07:04:33');
+/*!40000 ALTER TABLE `NL_PROP_RESALE` ENABLE KEYS */;
+UNLOCK TABLES;
+
+--
+-- Table structure for table `NL_USER`
+--
+
 DROP TABLE IF EXISTS `NL_USER`;
-CREATE TABLE `NL_USER`  (
-  `ID_NL_USER` int(11) NOT NULL AUTO_INCREMENT,
-  `ID_NL_USER_PERMISSION` int(11) NOT NULL,
-  `NL_USER_LOGIN` varchar(50) NOT NULL,
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `NL_USER` (
+  `ID_NL_USER` int NOT NULL AUTO_INCREMENT,
+  `ID_NL_USER_PERMISSION` int NOT NULL,
+  `NL_USER_LOGIN` varchar(50) COLLATE utf8mb4_unicode_ci NOT NULL,
   `NL_USER_PASSWORD` blob NOT NULL,
-  `NL_USER_SHORT` varchar(25) NOT NULL,
-  `NL_USER_FULL` varchar(2550) NOT NULL,
-  `NL_USER_PHONE` varchar(50) NULL DEFAULT NULL,
+  `NL_USER_SHORT` varchar(25) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `NL_USER_FULL` varchar(2550) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `NL_USER_PHONE` varchar(50) COLLATE utf8mb4_unicode_ci DEFAULT NULL,
   PRIMARY KEY (`ID_NL_USER`) USING BTREE,
-  INDEX `ID_NL_USER_PERMISSION`(`ID_NL_USER_PERMISSION`) USING BTREE,
+  KEY `ID_NL_USER_PERMISSION` (`ID_NL_USER_PERMISSION`) USING BTREE,
   CONSTRAINT `NL_USER_IBFK_1` FOREIGN KEY (`ID_NL_USER_PERMISSION`) REFERENCES `NL_USER_PERMISSION` (`ID_NL_USER_PERMISSION`) ON DELETE CASCADE ON UPDATE CASCADE
-) ENGINE = InnoDB AUTO_INCREMENT = 3;
+) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
 
--- ----------------------------
--- Records of NL_USER
--- ----------------------------
-INSERT INTO `NL_USER` VALUES (1, 2, 'admin', X'', 'Администратор', 'Администратор', '+79282601474');
+--
+-- Dumping data for table `NL_USER`
+--
 
--- ----------------------------
--- Table structure for NL_USER_PERMISSION
--- ----------------------------
+LOCK TABLES `NL_USER` WRITE;
+/*!40000 ALTER TABLE `NL_USER` DISABLE KEYS */;
+INSERT INTO `NL_USER` VALUES (1,2,'admin',X'','Администратор','Администратор','+79282601474');
+/*!40000 ALTER TABLE `NL_USER` ENABLE KEYS */;
+UNLOCK TABLES;
+
+--
+-- Table structure for table `NL_USER_PERMISSION`
+--
+
 DROP TABLE IF EXISTS `NL_USER_PERMISSION`;
-CREATE TABLE `NL_USER_PERMISSION`  (
-  `ID_NL_USER_PERMISSION` int(11) NOT NULL AUTO_INCREMENT,
-  `NL_USER_PERMISSION_SHORT` varchar(25) NOT NULL,
-  `NL_USER_PERMISSION_FULL` varchar(255) NOT NULL,
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `NL_USER_PERMISSION` (
+  `ID_NL_USER_PERMISSION` int NOT NULL AUTO_INCREMENT,
+  `NL_USER_PERMISSION_SHORT` varchar(25) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `NL_USER_PERMISSION_FULL` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
   PRIMARY KEY (`ID_NL_USER_PERMISSION`) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 4;
+) ENGINE=InnoDB AUTO_INCREMENT=4 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
 
--- ----------------------------
--- Records of NL_USER_PERMISSION
--- ----------------------------
-INSERT INTO `NL_USER_PERMISSION` VALUES (1, 'Пользователь', 'Пользователь');
-INSERT INTO `NL_USER_PERMISSION` VALUES (2, 'Администратор', 'Администратор');
-INSERT INTO `NL_USER_PERMISSION` VALUES (3, 'Гость', 'Гость');
+--
+-- Dumping data for table `NL_USER_PERMISSION`
+--
 
--- ----------------------------
--- Table structure for NL_VIEW
--- ----------------------------
+LOCK TABLES `NL_USER_PERMISSION` WRITE;
+/*!40000 ALTER TABLE `NL_USER_PERMISSION` DISABLE KEYS */;
+INSERT INTO `NL_USER_PERMISSION` VALUES (1,'Пользователь','Пользователь'),(2,'Администратор','Администратор'),(3,'Гость','Гость');
+/*!40000 ALTER TABLE `NL_USER_PERMISSION` ENABLE KEYS */;
+UNLOCK TABLES;
+
+--
+-- Table structure for table `NL_VIEW`
+--
+
 DROP TABLE IF EXISTS `NL_VIEW`;
-CREATE TABLE `NL_VIEW`  (
-  `ID_NL_VIEW` int(11) NOT NULL AUTO_INCREMENT,
-  `NL_VIEW_SHORT` varchar(25) NOT NULL,
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `NL_VIEW` (
+  `ID_NL_VIEW` int NOT NULL AUTO_INCREMENT,
+  `NL_VIEW_SHORT` varchar(25) COLLATE utf8mb4_unicode_ci NOT NULL,
   PRIMARY KEY (`ID_NL_VIEW`) USING BTREE
-) ENGINE = InnoDB AUTO_INCREMENT = 3;
+) ENGINE=InnoDB AUTO_INCREMENT=3 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
 
--- ----------------------------
--- Records of NL_VIEW
--- ----------------------------
-INSERT INTO `NL_VIEW` VALUES (1, 'На море');
-INSERT INTO `NL_VIEW` VALUES (2, 'В город');
+--
+-- Dumping data for table `NL_VIEW`
+--
 
-SET FOREIGN_KEY_CHECKS = 1;
+LOCK TABLES `NL_VIEW` WRITE;
+/*!40000 ALTER TABLE `NL_VIEW` DISABLE KEYS */;
+INSERT INTO `NL_VIEW` VALUES (1,'На море'),(2,'В город');
+/*!40000 ALTER TABLE `NL_VIEW` ENABLE KEYS */;
+UNLOCK TABLES;
+/*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
+
+/*!40101 SET SQL_MODE=@OLD_SQL_MODE */;
+/*!40014 SET FOREIGN_KEY_CHECKS=@OLD_FOREIGN_KEY_CHECKS */;
+/*!40014 SET UNIQUE_CHECKS=@OLD_UNIQUE_CHECKS */;
+/*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
+/*!40101 SET CHARACTER_SET_RESULTS=@OLD_CHARACTER_SET_RESULTS */;
+/*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
+/*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
+
+-- Dump completed on 2026-09-28  7:04:44
