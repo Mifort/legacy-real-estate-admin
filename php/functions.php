@@ -54,6 +54,12 @@
         return "Ошибка при работе с базой данных";
     }
 
+    // Код ошибки последнего запроса (например, 1062 — нарушение уникального ключа)
+    function db_errno() {
+        global $mysqli;
+        return $mysqli->errno;
+    }
+
     function db_real_escape_string($escapestr) {
         global $mysqli;
         return $mysqli->real_escape_string($escapestr);

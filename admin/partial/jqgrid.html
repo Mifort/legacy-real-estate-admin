@@ -60,6 +60,15 @@
         afterclickPgButtons : function(whichbutton, formid, rowid) {
             $(formid.selector + " select").trigger("chosen:updated");
         },
+        // Ключ отправки формы (он же ключ черновика загрузок): повторная отправка той же
+        // формы, например после потери ответа, не создаёт дубликат записи
+        onclickSubmit : function(params, postdata) {
+            var $form = $("#FrmGrid_{tableName} .EditTable");
+            if (!$form.data("uploadDraft")) {
+                $form.data("uploadDraft", uploadDraftToken());
+            }
+            return { form_submit : $form.data("uploadDraft") };
+        },
         closeAfterAdd : true,
         closeOnEscape : true,
         recreateForm : true,

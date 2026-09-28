@@ -97,9 +97,24 @@
         mkdir($targetDir, 0755, true);
     }
 
-    // Файлы брошенных черновиков (форма добавления закрыта без сохранения) старше суток удаляем
-    foreach ((glob($targetDir . "/*_d*") ?: array()) as $stale) {
-        if (preg_match('/_d[a-f0-9]{32}_/', basename($stale)) && is_file($stale) && (time() - filemtime($stale) > UPLOAD_DRAFT_TTL)) {
+    // Очистка: файлы старше суток, на которые не ссылается ни одна запись таблицы
+    // (брошенные черновики, лишние файлы после сбоя удаления). Файлы сохранённых записей
+    // не трогаются; незавершённых операций не бывает — сохранение атомарно
+    $referenced = array();
+    foreach ($table->colArray as $c) {
+        if (is_object($c) && (($c->type === "photo") || ($c->type === "photos"))) {
+            $resRef = db_query("SELECT " . $c->dbName . " AS P FROM " . $tbl . " WHERE " . $c->dbName . " IS NOT NULL") or die(db_error("upload cleanup"));
+            while ($rowRef = db_fetch_assoc($resRef)) {
+                foreach ((array)json_decode((string)$rowRef["P"], true) as $p) {
+                    if (is_string($p)) {
+                        $referenced[basename($p)] = true;
+                    }
+                }
+            }
+        }
+    }
+    foreach ((glob($targetDir . "/*") ?: array()) as $stale) {
+        if (is_file($stale) && !isset($referenced[basename($stale)]) && (time() - filemtime($stale) > UPLOAD_DRAFT_TTL)) {
             @unlink($stale);
         }
     }

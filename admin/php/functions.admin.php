@@ -972,7 +972,20 @@ function showOnlyMy(jqgrid, row) {
                 die("Недостаточно прав");
             }
 
-            $res_cur = null;
+            // Ключ отправки формы добавления: повтор того же запроса (например, после потери
+            // ответа) не создаёт дубликат, а возвращает уже созданную запись
+            $submitToken = "";
+            if ($oper == "add") {
+                $submitToken = (string)($post["form_submit"] ?? "");
+                if (!preg_match('/^[a-f0-9]{32}$/', $submitToken)) {
+                    http_response_code(400);
+                    die("Нет ключа отправки формы, откройте форму добавления заново");
+                }
+                if ($this->findSubmitted($submitToken) !== null) {
+                    return;
+                }
+            }
+
             $row_cur = array();
             if ($oper != "add") {
                 $query_cur = "SELECT * FROM " . $this->dbName . " WHERE ID_" . $this->dbName . " = " . db_int($id);
@@ -992,21 +1005,52 @@ function showOnlyMy(jqgrid, row) {
                 }
             }
 
-            // Серверная проверка значений (клиентские required/maxLength можно обойти)
+            // Серверная проверка значений (клиентские required/maxLength можно обойти),
+            // в т.ч. что все фотографии существуют и принадлежат записи или черновику пользователя
             if ($oper != "del") {
-                $error = $this->validatePost($oper, db_int($id), $post);
+                $error = $this->validatePost($oper, db_int($id), $post, $row_cur);
                 if ($error !== "") {
                     http_response_code(400);
                     die($error);
                 }
             }
 
+            // Всё сохранение — одна транзакция: журнал, запись, ключ отправки. Файлы при
+            // сохранении не перемещаются, поэтому при ошибке или падении процесса на диске
+            // откатывать нечего, а черновик остаётся для повторной отправки
+            db_query("START TRANSACTION") or die(db_error("START TRANSACTION"));
+
+            if ($oper == "add") {
+                $query_submit = "INSERT INTO NL_FORM_SUBMIT (NL_FORM_SUBMIT_TOKEN, NL_FORM_SUBMIT_TABLE, NL_FORM_SUBMIT_RECORD, ID_NL_USER, NL_FORM_SUBMIT_TIME) VALUES (" . db_quote($submitToken) . ", " . db_quote($this->dbName) . ", 0, " . db_int($_SESSION["ID_NL_USER"]) . ", NOW())";
+                if (!db_query($query_submit)) {
+                    $duplicate = (db_errno() == 1062);
+                    $message = db_error($query_submit);
+                    db_query("ROLLBACK");
+                    // Параллельный запрос с тем же ключом успел сохранить запись
+                    if ($duplicate && ($this->findSubmitted($submitToken) !== null)) {
+                        http_response_code(200);
+                        return;
+                    }
+                    die($message);
+                }
+            } else {
+                // Перечитываем запись под блокировкой: старый список фото берём из неё
+                $query_lock = "SELECT * FROM " . $this->dbName . " WHERE ID_" . $this->dbName . " = " . db_int($id) . " FOR UPDATE";
+                $res_lock = db_query($query_lock) or $this->rollbackAndDie($query_lock);
+                $row_cur = db_fetch_assoc($res_lock);
+                if (!$row_cur) {
+                    db_query("ROLLBACK");
+                    http_response_code(404);
+                    die("Запись не найдена");
+                }
+            }
+
             $user_ip = client_ip();
             // log master
             $query_log = "INSERT INTO NL_LOG(NL_LOG_DATE, NL_LOG_TIME, NL_LOG_IP, NL_LOG_IUD, NL_LOG_TABLE_NAME, ID_NL_USER) VALUES(" . db_quote(date("Y.m.d")) . ", " . db_quote(date("H:i:s")) . ", " . db_quote($user_ip) . ", " . db_quote($oper) . ", " . db_quote($this->dbName) . ", " . db_int($_SESSION["ID_NL_USER"]) . ")";
-            db_query($query_log) or die(db_error($query_log));
+            db_query($query_log) or $this->rollbackAndDie($query_log);
             $query_log = "SELECT LAST_INSERT_ID() AS ID_LOG";
-            $res_log = db_query($query_log) or die(db_error($query_log));
+            $res_log = db_query($query_log) or $this->rollbackAndDie($query_log);
             $row_log = db_fetch_assoc($res_log);
 
             $fields = Array();
@@ -1052,7 +1096,7 @@ function showOnlyMy(jqgrid, row) {
 
                     if ($col->type != "encrypted") {
                         $valold = "''";
-                        if (($res_cur !== null) && (db_num_rows($res_cur) > 0)) {
+                        if ($row_cur) {
                             $valold = db_quote($row_cur[$col->dbName] ?? "");
                         }
                         $valnew = "''";
@@ -1061,41 +1105,25 @@ function showOnlyMy(jqgrid, row) {
                         }
 
                         $query_log_detail = "INSERT INTO NL_LOG_DETAIL(ID_NL_LOG, NL_LOG_DETAIL_OLD, NL_LOG_DETAIL_NEW, NL_LOG_DETAIL_FIELD) VALUES (" . db_int($row_log["ID_LOG"]) . ", " . $valold . ", " . $valnew . ", " . db_quote($col->dbName) . ")";
-                        db_query($query_log_detail) or die(db_error($query_log_detail));
+                        db_query($query_log_detail) or $this->rollbackAndDie($query_log_detail);
                     }
                 }
 
-                // Лишние изображения. Только для существующей записи, которую пользователь вправе
-                // менять (проверено выше); при добавлении файлы не трогаем. Удаляем после
-                // успешного SQL — здесь только собираем список
+                // Файлы, которые перестали быть нужны: были в сохранённой записи и отсутствуют
+                // в новом списке (при удалении записи — все её файлы). Удаляются после COMMIT
                 if ((($col->type == "photo") || ($col->type == "photos")) && ($oper != "add")) {
-                    $trueId = db_int($id);
-                    // Тот же каталог и шаблон имени, что в file.upload.php: <COL>_<ID>_<дата>_<суффикс>.<ext>
-                    $imgsPath = $_SERVER["DOCUMENT_ROOT"] . "/img/" . strtolower(str_replace("NL_", "", $this->dbName)) . "/";
-                    foreach ((glob($imgsPath . str_replace($this->dbName . "_", "", $col->dbName) . "_" . $trueId . "_*") ?: array()) as $fullFileName) {
-                        $fileName = mb_substr($fullFileName, mb_strrpos($fullFileName, "/") + 1);
-                        $needDel = true;
-                        if ($oper != "del") {
-                            $photos = isset($post[$col->dbName]) ? json_decode($post[$col->dbName]) : null;
-                            if (!is_array($photos)) { $photos = array(); }
-                            for ($ji = 0; $ji < count($photos); $ji++) {
-                                $curPhoto = mb_substr($photos[$ji], mb_strrpos($photos[$ji], "/") + 1);
-                                if ($curPhoto == $fileName) {
-                                    $needDel = false;
-                                }
-                            }
-                        }
-                        if ($needDel) {
-                            $filesToDelete[] = $imgsPath . $fileName;
+                    $oldPhotos = json_decode((string)($row_cur[$col->dbName] ?? ""), true);
+                    $newPhotos = ($oper == "del") ? array() : json_decode((string)($post[$col->dbName] ?? ""), true);
+                    foreach (array_diff(is_array($oldPhotos) ? $oldPhotos : array(), is_array($newPhotos) ? $newPhotos : array()) as $photo) {
+                        $file = $this->photoFilePath($photo);
+                        if ($file !== null) {
+                            $filesToDelete[] = $file;
                         }
                     }
                 }
             }
             //
             $query = "";
-            $tableName = substr($this->dbName, 3);
-            /** @var ObjectParam $idObject */
-            $idObject = $this->getMainTableCol("ID_" . $this->dbName . "", $tableName);
             if ($oper == "add") {
                 $query = "INSERT INTO " . $this->dbName . " (" . implode(",", $fields) . ") VALUES(" . implode(",", $values) . ")";
             } elseif ($oper == "edit") {
@@ -1110,63 +1138,56 @@ function showOnlyMy(jqgrid, row) {
             } elseif ($oper == "del") {
                 $query = "DELETE FROM " . $this->dbName . " WHERE ID_" . $this->dbName . " = " . db_int($id);
             }
-            if (!db_query($query)) {
-                // Запись не изменилась — файлы остаются на месте
-                die(db_error($query));
-            }
-
-            foreach ($filesToDelete as $file) {
-                if (is_file($file)) {
-                    unlink($file);
-                }
-            }
+            db_query($query) or $this->rollbackAndDie($query);
 
             if ($oper == "add") {
-                $this->attachDraftPhotos($post);
+                $query_new = "UPDATE NL_FORM_SUBMIT SET NL_FORM_SUBMIT_RECORD = LAST_INSERT_ID() WHERE NL_FORM_SUBMIT_TOKEN = " . db_quote($submitToken);
+                db_query($query_new) or $this->rollbackAndDie($query_new);
+            }
+
+            db_query("COMMIT") or $this->rollbackAndDie("COMMIT");
+
+            // Данные сохранены. Сбой удаления оставит лишний файл (мусор, его уберёт очистка
+            // неиспользуемых файлов), но не потерю данных
+            foreach ($filesToDelete as $file) {
+                if (is_file($file) && !@unlink($file)) {
+                    error_log("saveData: could not delete " . $file);
+                }
             }
         }
 
-        // После вставки: ID назначила база. Файлы черновика (<COL>_d<ключ>_...) переименовываем
-        // в <COL>_<ID>_... и сохраняем в записи новые пути
-        private function attachDraftPhotos($post) {
-            $resNew = db_query("SELECT LAST_INSERT_ID() AS ID_NEW") or die(db_error("LAST_INSERT_ID"));
-            $newId = (int)db_fetch_assoc($resNew)["ID_NEW"];
-            if ($newId <= 0) {
-                return;
+        // Ошибка внутри транзакции: сообщение фиксируем до ROLLBACK (иначе потеряется текст ошибки)
+        private function rollbackAndDie($query) {
+            $message = db_error($query);
+            db_query("ROLLBACK");
+            die($message);
+        }
+
+        // ID записи, уже сохранённой по этому ключу отправки, или null
+        private function findSubmitted($token) {
+            $res = db_query("SELECT NL_FORM_SUBMIT_TABLE, NL_FORM_SUBMIT_RECORD, ID_NL_USER FROM NL_FORM_SUBMIT WHERE NL_FORM_SUBMIT_TOKEN = " . db_quote($token)) or die(db_error("findSubmitted"));
+            $row = db_fetch_assoc($res);
+            if (!$row) {
+                return null;
             }
-            $root = $_SERVER["DOCUMENT_ROOT"];
-            for ($i = 0; $i < (count($this->colArray) / 2); $i++) {
-                $col = $this->colArray[$i];
-                if ((($col->type != "photo") && ($col->type != "photos")) || empty($post[$col->dbName])) {
-                    continue;
-                }
-                $photos = json_decode($post[$col->dbName], true);
-                if (!is_array($photos)) {
-                    continue;
-                }
-                $colPrefix = str_replace($this->dbName . "_", "", $col->dbName);
-                $changed = false;
-                foreach ($photos as $k => $photo) {
-                    $base = basename($photo);
-                    if (!preg_match('/^' . preg_quote($colPrefix, '/') . '_d[a-f0-9]{32}_(.+)$/', $base, $m)) {
-                        continue;
-                    }
-                    $newPath = dirname($photo) . "/" . $colPrefix . "_" . $newId . "_" . $m[1];
-                    if (is_file($root . $photo) && !file_exists($root . $newPath) && rename($root . $photo, $root . $newPath)) {
-                        $photos[$k] = $newPath;
-                        $changed = true;
-                    } else {
-                        error_log("attachDraftPhotos: could not rename " . $photo);
-                    }
-                }
-                if ($changed) {
-                    db_query("UPDATE " . $this->dbName . " SET " . $col->dbName . " = " . db_quote(json_encode(array_values($photos), JSON_UNESCAPED_SLASHES)) . " WHERE ID_" . $this->dbName . " = " . $newId) or die(db_error("attachDraftPhotos"));
-                }
+            if (($row["NL_FORM_SUBMIT_TABLE"] !== $this->dbName) || ((int)$row["ID_NL_USER"] !== (int)$_SESSION["ID_NL_USER"])) {
+                http_response_code(409);
+                die("Ключ отправки формы уже использован, откройте форму заново");
             }
+            return (int)$row["NL_FORM_SUBMIT_RECORD"];
+        }
+
+        // Абсолютный путь к файлу фото этой таблицы или null, если путь недопустим
+        private function photoFilePath($photo) {
+            $dir = strtolower(str_replace("NL_", "", $this->dbName));
+            if (!is_string($photo) || !preg_match('#^/img/' . preg_quote($dir, '#') . '/[A-Za-z0-9_.-]+\.(jpe?g|png|gif|webp)$#i', $photo)) {
+                return null;
+            }
+            return $_SERVER["DOCUMENT_ROOT"] . $photo;
         }
 
         // Проверяет и нормализует значения формы. Возвращает текст ошибки или "".
-        private function validatePost($oper, $id, &$post) {
+        private function validatePost($oper, $id, &$post, $row_cur = array()) {
             for ($i = 0; $i < (count($this->colArray) / 2); $i++) {
                 /* @var $col ObjectParam */
                 $col = $this->colArray[$i];
@@ -1195,17 +1216,26 @@ function showOnlyMy(jqgrid, row) {
                     }
                     $dir = strtolower(str_replace("NL_", "", $this->dbName));
                     $colPrefix = str_replace($this->dbName . "_", "", $col->dbName);
+                    // Уже сохранённые в записи файлы допустимы при правке (в т.ч. с именем черновика)
+                    $savedPhotos = json_decode((string)($row_cur[$col->dbName] ?? ""), true);
+                    $savedPhotos = is_array($savedPhotos) ? $savedPhotos : array();
                     foreach ($photos as $photo) {
                         if (!is_string($photo) || !preg_match('#^/img/' . preg_quote($dir, '#') . '/[A-Za-z0-9_.-]+\.(jpe?g|png|gif|webp)$#i', $photo)) {
                             return "Недопустимый путь фотографии";
                         }
-                        // Файл должен принадлежать этой записи (edit) или черновику пользователя (add)
+                        // Файл должен принадлежать этой записи (edit), черновику пользователя (add)
+                        // или уже быть сохранён в этой записи
                         if (!preg_match('/^' . preg_quote($colPrefix, '/') . '_(\d+|d([a-f0-9]{32}))_/', basename($photo), $m)) {
                             return "Недопустимое имя файла фотографии";
                         }
                         $isDraft = isset($m[2]) && ($m[2] !== "");
-                        if ($isDraft ? (($oper != "add") || !upload_draft_owned($m[2])) : (($oper != "edit") || ((int)$m[1] !== (int)$id))) {
+                        $alreadySaved = ($oper == "edit") && in_array($photo, $savedPhotos, true);
+                        $allowed = $alreadySaved || ($isDraft ? (($oper == "add") && upload_draft_owned($m[2])) : (($oper == "edit") && ((int)$m[1] === (int)$id)));
+                        if (!$allowed) {
                             return "Фотография не принадлежит этой записи";
+                        }
+                        if (!is_file($_SERVER["DOCUMENT_ROOT"] . $photo)) {
+                            return "Файл фотографии не найден: " . basename($photo) . ". Загрузите его заново";
                         }
                     }
                     // Храним в каноническом виде
