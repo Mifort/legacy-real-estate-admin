@@ -62,6 +62,25 @@
     $date = date('ymd_His', time()) . "_" . bin2hex(random_bytes(4));
     $id = db_int($_REQUEST["id"] ?? 0);
 
+    // Гость не сохраняет записи — и файлы ему загружать незачем
+    if ($_SESSION["ID_NL_USER_PERMISSION"] == "3") {
+        http_response_code(403);
+        die("Недостаточно прав");
+    }
+
+    // Файлы существующей записи может добавлять только её владелец или администратор.
+    // Для новой записи (ID ещё не занят) проверять нечего
+    if ($id > 0) {
+        $resOwner = db_query("SELECT * FROM " . $tbl . " WHERE ID_" . $tbl . " = " . $id) or die(db_error("upload owner"));
+        $rowOwner = db_fetch_assoc($resOwner);
+        if ($rowOwner) {
+            if (!is_admin() && array_key_exists("ID_NL_USER", $rowOwner) && ($rowOwner["ID_NL_USER"] != $_SESSION["ID_NL_USER"])) {
+                http_response_code(403);
+                die("Нельзя загружать файлы в чужую запись");
+            }
+        }
+    }
+
     $baseDir = realpath($_SERVER["DOCUMENT_ROOT"] . "/img");
     $targetDir = $baseDir . "/" . $dir;
     if (!is_dir($targetDir)) {

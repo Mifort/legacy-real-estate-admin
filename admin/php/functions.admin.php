@@ -946,27 +946,50 @@ function showOnlyMy(jqgrid, row) {
 
         public function saveData($oper, $id, $post) {
             // "add" - insert, "edit" - update, "del" - delete
+            if (!in_array($oper, array("add", "edit", "del"), true)) {
+                http_response_code(400);
+                die("Неизвестная операция");
+            }
 
             if ($this->readOnly) {
-                die();
+                http_response_code(403);
+                die("Таблица доступна только для чтения");
             }
 
             // Если пользователь может только редактировать запись
             if ((($this->editOnly) || ($_SESSION["ID_NL_USER_PERMISSION"] == "3")) && (($oper == "add") || ($oper == "del"))) {
-                die();
+                http_response_code(403);
+                die("Недостаточно прав");
             }
 
             $res_cur = null;
             $row_cur = array();
-            if ($oper != "add") {
+            if ($oper == "add") {
+                // ID новой записи приходит из формы (set_id.php). Занятый номер отклоняем сразу,
+                // до любых побочных эффектов: иначе можно было задеть файлы чужой записи
+                $newId = db_int($post["ID_" . $this->dbName] ?? 0);
+                if ($newId > 0) {
+                    $resExists = db_query("SELECT 1 FROM " . $this->dbName . " WHERE ID_" . $this->dbName . " = " . $newId) or die(db_error("saveData exists"));
+                    if (db_num_rows($resExists) > 0) {
+                        http_response_code(409);
+                        die("Запись с таким номером уже существует, откройте форму добавления заново");
+                    }
+                }
+            } else {
                 $query_cur = "SELECT * FROM " . $this->dbName . " WHERE ID_" . $this->dbName . " = " . db_int($id);
                 $res_cur = db_query($query_cur) or die(db_error($query_cur));
                 $row_cur = db_fetch_assoc($res_cur);
+                if (!$row_cur) {
+                    http_response_code(404);
+                    die("Запись не найдена");
+                }
 
                 if ($_SESSION["ID_NL_USER_PERMISSION"] == "3") {
-                    die();
+                    http_response_code(403);
+                    die("Недостаточно прав");
                 } elseif (($_SESSION["ID_NL_USER_PERMISSION"] == "1") && ($row_cur["ID_NL_USER"] != $_SESSION["ID_NL_USER"])) {
-                    die();
+                    http_response_code(403);
+                    die("Нельзя изменять чужую запись");
                 }
             }
 
@@ -989,6 +1012,7 @@ function showOnlyMy(jqgrid, row) {
 
             $fields = Array();
             $values = Array();
+            $filesToDelete = Array();
             for ($i = 0; $i < (count($this->colArray) / 2); $i++) {
                 /* @var $col ObjectParam */
                 $col = $this->colArray[$i];
@@ -1039,12 +1063,11 @@ function showOnlyMy(jqgrid, row) {
                     }
                 }
 
-                // Удаляем лишние изображения
-                if (($col->type == "photo") || ($col->type == "photos")) {
+                // Лишние изображения. Только для существующей записи, которую пользователь вправе
+                // менять (проверено выше); при добавлении файлы не трогаем. Удаляем после
+                // успешного SQL — здесь только собираем список
+                if ((($col->type == "photo") || ($col->type == "photos")) && ($oper != "add")) {
                     $trueId = db_int($id);
-                    if (($oper == "add") && isset($values[0]) && is_numeric($values[0])) {
-                        $trueId = db_int($values[0]);
-                    }
                     // Тот же каталог и шаблон имени, что в file.upload.php: <COL>_<ID>_<дата>_<суффикс>.<ext>
                     $imgsPath = $_SERVER["DOCUMENT_ROOT"] . "/img/" . strtolower(str_replace("NL_", "", $this->dbName)) . "/";
                     foreach ((glob($imgsPath . str_replace($this->dbName . "_", "", $col->dbName) . "_" . $trueId . "_*") ?: array()) as $fullFileName) {
@@ -1061,7 +1084,7 @@ function showOnlyMy(jqgrid, row) {
                             }
                         }
                         if ($needDel) {
-                            unlink($imgsPath . $fileName);
+                            $filesToDelete[] = $imgsPath . $fileName;
                         }
                     }
                 }
@@ -1085,7 +1108,16 @@ function showOnlyMy(jqgrid, row) {
             } elseif ($oper == "del") {
                 $query = "DELETE FROM " . $this->dbName . " WHERE ID_" . $this->dbName . " = " . db_int($id);
             }
-            db_query($query) or die(db_error($query));
+            if (!db_query($query)) {
+                // Запись не изменилась — файлы остаются на месте
+                die(db_error($query));
+            }
+
+            foreach ($filesToDelete as $file) {
+                if (is_file($file)) {
+                    unlink($file);
+                }
+            }
         }
 
         // Проверяет и нормализует значения формы. Возвращает текст ошибки или "".
