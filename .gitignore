@@ -7,3 +7,4 @@
 *:Zone.Identifier
 .idea/
 /composer
+/.phpunit.cache/
