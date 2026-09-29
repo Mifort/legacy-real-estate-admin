@@ -28,8 +28,7 @@ docker compose exec -T web php scripts/set-admin-password.php < .local-secrets/a
 
 ### Учётные данные админки
 
-Логин: `admin`. Случайный пароль хранится только в локальном файле
-`.local-secrets/admin-password` (права 0600). Для просмотра:
+Логин: `admin`. Пароль задаётся CLI-командой `scripts/set-admin-password.php` из локального файла `.local-secrets/admin-password` (права 0600). Случайное значение хранится только там. Для просмотра:
 
 ```bash
 cat .local-secrets/admin-password
@@ -97,6 +96,8 @@ TEST_WEB_PORT=8091 TEST_DB_PORT=33077 ./run-tests.sh
 - пароль `admin` скрипт генерирует заново во временной копии (в git его нет);
 - агент `test_agent` и гость `test_guest` создаются в `tests/bootstrap.php`;
 - описания Quill и JPEG для загрузки тесты собирают сами и после проверки удаляют.
+
+Покрытие: вход, доступ, справочники, сохранение, фото, лендинг. Полный список — в [REPORT.md](REPORT.md), раздел «Как проверялось».
 
 ## Отчёт
 
